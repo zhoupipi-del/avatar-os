@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Mood } from "@avatar-os/primitives";
+import { listen } from "@tauri-apps/api/event";
 import { eventBus, avatarFSM, initThoughtRelay, kernelEventBus } from "@avatar-os/runtime";
 import { mouseSensor } from "../sensor/MouseSensor";
 import { calculateFrame, VisualFrame } from "../renderer/visual-transform";
@@ -139,8 +140,11 @@ export function Avatar() {
     });
 
     // 视线追踪 + 鼠标引力光标采集 + 拖拽加速度采集
+    // 统一入口：输入为"视口坐标 (vx, vy)"
+    //  - 窗口内 mousemove：直接给 e.clientX/Y（视口坐标）
+    //  - 全局鼠标钩子：screen 坐标 - window.screenX/Y 转为视口坐标
     let lastTime = 0;
-    const onMove = (e: MouseEvent) => {
+    const applyPointerViewport = (vx: number, vy: number) => {
       const now = Date.now();
       if (now - lastTime < 50) return;
       lastTime = now;
@@ -149,8 +153,8 @@ export function Avatar() {
       const rect = el.getBoundingClientRect();
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
-      const dx = e.clientX - cx;
-      const dy = e.clientY - cy;
+      const dx = vx - cx;
+      const dy = vy - cy;
       const distance = Math.hypot(dx, dy);
       const base = calculateFrame(dx, dy, distance);
 
@@ -163,13 +167,16 @@ export function Avatar() {
       }));
 
       // F1: 光标 → SVG 坐标, 供 gesture tick 算够指针角
-      svgCursorRef.current = clientToSvg(e.clientX, e.clientY, rect);
+      svgCursorRef.current = clientToSvg(vx, vy, rect);
 
       // 任何鼠标移动都算"交互"：重置空闲计时并取消正在播放的空闲动作
       lastInteractionRef.current = now;
       cancelIdle();
+    };
 
-      // F3: 拖拽中 → 由移动差分推导甩动加速度
+    const onMove = (e: MouseEvent) => {
+      applyPointerViewport(e.clientX, e.clientY);
+      // F3: 拖拽中 → 由移动差分推导甩动加速度（拖拽只在窗口内发生）
       const d = dragRef.current;
       if (d.active) {
         const mdx = e.clientX - d.lastX;
@@ -182,6 +189,18 @@ export function Avatar() {
       }
     };
     window.addEventListener("mousemove", onMove);
+
+    // 全局鼠标引力：Rust 端 WH_MOUSE_LL 钩子推送全屏光标坐标，
+    // 让宠物能响应屏幕任意位置的鼠标移动（窗口内 mousemove 只覆盖小窗本身）
+    let unlistenGlobal: (() => void) | undefined;
+    listen<{ x: number; y: number }>("global-mousemove", (event) => {
+      const p = event.payload;
+      // [TEMP-VERIFY] 调试用：把全局光标坐标写进标题，验证 Rust→JS 链路
+      document.title = `GLOBAL:${p.x},${p.y}`;
+      applyPointerViewport(p.x - window.screenX, p.y - window.screenY);
+    }).then((fn) => {
+      unlistenGlobal = fn;
+    });
 
     // F2: 键盘打字强度采集
     const onKeyDown = () => {
@@ -337,6 +356,7 @@ export function Avatar() {
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mouseup", onMouseUp);
       window.clearInterval(tick);
+      unlistenGlobal?.();
     };
   }, []);
 
