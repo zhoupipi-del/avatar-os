@@ -1,12 +1,23 @@
-// vitest 配置 — 仅覆盖 packages/*/tests 下的规格文件
-// 环境用 node（DriveEngine / BehaviorVM 不依赖 DOM，event-bus 为纯 Map 实现）
 import { defineConfig } from "vitest/config";
+import path from "path";
 
+// 用 process.cwd() 而非 __dirname：本仓库根 package.json 无 "type":"module"，
+// 但 vitest 以 esbuild 加载此配置，__dirname 在 ESM 上下文可能 undefined。
+// pnpm test 始终从仓库根执行，故 process.cwd() === 仓库根，最稳。
 export default defineConfig({
   test: {
-    include: ["packages/**/tests/**/*.spec.ts"],
+    globals: true,
     environment: "node",
-    // 单测也是仓库质量门禁的一部分，失败即阻断
-    bail: 0,
+    include: ["packages/**/tests/**/*.spec.ts", "packages/**/*.spec.ts"],
+  },
+  resolve: {
+    alias: {
+      "@avatar-os/primitives": path.resolve(process.cwd(), "packages/primitives/src"),
+      "@avatar-os/runtime": path.resolve(process.cwd(), "packages/runtime/src"),
+      "@avatar-os/memory": path.resolve(process.cwd(), "packages/memory/src"),
+      "@avatar-os/presence": path.resolve(process.cwd(), "packages/presence/src"),
+      "@avatar-os/sensor": path.resolve(process.cwd(), "packages/sensor/src"),
+      "@avatar-os/morphology": path.resolve(process.cwd(), "packages/morphology/src"),
+    },
   },
 });

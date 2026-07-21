@@ -3,7 +3,7 @@ import { Avatar } from "./avatar/Avatar";
 import { presenceEngine } from "@avatar-os/presence";
 import { telemetry } from "@avatar-os/telemetry";
 import { memoryStore } from "@avatar-os/memory";
-import { eventBus, LifeLoop, behaviorVM, registerDefaultRules } from "@avatar-os/runtime";
+import { eventBus, LifeLoop, behaviorVM, registerDefaultRules, AgentSandbox } from "@avatar-os/runtime";
 import { PresenceSensorLayer } from "@avatar-os/sensor";
 import { setClickThrough } from "./window/window-state";
 
@@ -45,6 +45,10 @@ export default function App() {
       tickMs: DRIVE_TICK_MS,
     });
     lifeLoop.start();
+
+    // 调试沙箱：暴露受控外部意图注入入口（LLM/多模态挂载点）。
+    // 仅作 window 调试句柄，不改动任何既有自举链路。
+    (window as unknown as { __AVATAR_SANDBOX__?: typeof AgentSandbox }).__AVATAR_SANDBOX__ = AgentSandbox;
 
     // 沉睡/疲惫时启用点击穿透，清醒时恢复可交互
     const unbindMood = eventBus.on("STATE_MOOD_CHANGED", (p) => {

@@ -13,6 +13,14 @@ export class AvatarFSM {
     return { ...this.state };
   }
 
+  /**
+   * 情绪状态恢复（Snapshot 回填用）。直接覆盖内部 state。
+   */
+  public restoreState(savedMood: MoodState): void {
+    this.state = { ...savedMood };
+    console.log(`[AvatarFSM 🔄] Mood restored to ${savedMood.current}`);
+  }
+
   private initListeners() {
     // 近场触发（新内核 SENSOR_MOUSE_NEAR）
     kernelEventBus.on("SENSOR_MOUSE_NEAR", () => {

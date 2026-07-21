@@ -8,3 +8,5 @@ export * from "./behavior/vm";
 export * from "./life-loop";
 export * from "./kernel";
 export * from "./utils/throttle";
+export * from "./snapshot-manager";
+export * from "./agent-sandbox";
