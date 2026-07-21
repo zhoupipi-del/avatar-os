@@ -10,10 +10,13 @@ export interface AnimationManagerOptions {
 /**
  * 动画管理器 —— 统一接管模型自带的 Animation Clip，提供平滑过渡(CrossFade)能力。
  *
- * 与渲染层解耦：它只认「一个根 Object3D + 一组 AnimationClip」，
+ * 与渲染层解耦：它只认「一个 AnimationMixer + 一组已建好的 AnimationAction」，
  * 不关心这是 bag character、RobotExpressive 还是未来的 VRM。
  * 片段名由外部配置(RigConfig)注入 —— 因为 AI/Tripo 导出的 GLB
  * 常常残留 NlaTrack/NlaTrack.001 这种无语义名，绝不能硬编码 "idle/wave/walk"。
+ *
+ * 采用 R3F 惯用形态：由 useAnimations 产出 mixer + actions 后注入，
+ * 而非自己 new Mixer —— 避免与 drei 缓存的 scene 重复建 mixer 导致动画不播。
  */
 export class AnimationManager {
   private mixer: THREE.AnimationMixer;
@@ -22,16 +25,19 @@ export class AnimationManager {
   private idleClip: string;
   private fade: number;
 
-  constructor(root: THREE.Object3D, clips: THREE.AnimationClip[], opts: AnimationManagerOptions) {
-    this.mixer = new THREE.AnimationMixer(root);
+  constructor(
+    mixer: THREE.AnimationMixer,
+    actions: Record<string, THREE.AnimationAction>,
+    opts: AnimationManagerOptions,
+  ) {
+    this.mixer = mixer;
     this.idleClip = opts.idleClip;
     this.fade = opts.fade ?? 0.3;
 
-    for (const clip of clips) {
-      const action = this.mixer.clipAction(clip);
+    for (const [name, action] of Object.entries(actions)) {
       // 原始名 + 大小写不敏感别名，便于按近似名检索
-      this.actions.set(clip.name, action);
-      this.actions.set(clip.name.toLowerCase(), action);
+      this.actions.set(name, action);
+      this.actions.set(name.toLowerCase(), action);
     }
   }
 

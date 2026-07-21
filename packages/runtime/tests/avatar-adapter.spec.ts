@@ -7,12 +7,29 @@ import { kernelEventBus } from "../src/event-bus";
 import { Mood } from "@avatar-os/primitives";
 
 describe("AnimationManager", () => {
-  const root = new THREE.Object3D();
-  const clips = [
-    new THREE.AnimationClip("idle", 1, []),
-    new THREE.AnimationClip("NlaTrack.001", 1, []),
-  ];
-  const am = new AnimationManager(root, clips, { idleClip: "idle" });
+  const makeAction = () => {
+    const a: any = {
+      reset: vi.fn(() => a),
+      fadeIn: vi.fn(() => a),
+      fadeOut: vi.fn(() => a),
+      play: vi.fn(() => a),
+      stop: vi.fn(() => a),
+      setLoop: vi.fn(() => a),
+      clampWhenFinished: false,
+    };
+    return a as unknown as THREE.AnimationAction;
+  };
+  const mixer = {
+    update: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  } as unknown as THREE.AnimationMixer;
+
+  const actions: Record<string, THREE.AnimationAction> = {
+    idle: makeAction(),
+    "NlaTrack.001": makeAction(),
+  };
+  const am = new AnimationManager(mixer, actions, { idleClip: "idle" });
 
   it("按名/大小写不敏感检索片段", () => {
     expect(am.has("idle")).toBe(true);
@@ -21,12 +38,22 @@ describe("AnimationManager", () => {
     expect(am.has("missing")).toBe(false);
   });
 
-  it("play / playOnce / tick 不抛错", () => {
-    expect(() => {
-      am.play("idle");
-      am.playOnce("NlaTrack.001");
-      am.tick(0.016);
-    }).not.toThrow();
+  it("play 触发对应 action 的 reset/fadeIn/play", () => {
+    am.play("idle");
+    expect(actions.idle.reset).toHaveBeenCalled();
+    expect(actions.idle.fadeIn).toHaveBeenCalledWith(0.3);
+    expect(actions.idle.play).toHaveBeenCalled();
+  });
+
+  it("playOnce 设置 LoopOnce 并监听 finished 自动回 idle", () => {
+    am.playOnce("NlaTrack.001");
+    expect(actions["NlaTrack.001"].setLoop).toHaveBeenCalledWith(THREE.LoopOnce, 1);
+    expect((mixer as any).addEventListener).toHaveBeenCalledWith("finished", expect.any(Function));
+  });
+
+  it("tick 推进 mixer", () => {
+    am.tick(0.016);
+    expect((mixer as any).update).toHaveBeenCalledWith(0.016);
   });
 });
 
