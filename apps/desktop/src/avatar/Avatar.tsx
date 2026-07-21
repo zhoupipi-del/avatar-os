@@ -25,8 +25,9 @@ import {
   type SpringState,
   type SystemStatus,
 } from "@avatar-os/morphology";
-import { Body } from "./components/Body";
 import { ThoughtBubble } from "./components/ThoughtBubble";
+import { RiggedGLBSkin } from "./skins/SkinRegistry";
+import { gazeBus } from "./skins/gazeBus";
 import "./Avatar.css";
 
 interface RenderParams {
@@ -169,6 +170,10 @@ export function Avatar() {
       // F1: 光标 → SVG 坐标, 供 gesture tick 算够指针角
       svgCursorRef.current = clientToSvg(vx, vy, rect);
 
+      // 视线总线：喂给 3D 皮肤头部骨骼做平滑跟随
+      gazeBus.x = base.eyeOffset.x + bias.x;
+      gazeBus.y = base.eyeOffset.y + bias.y;
+
       // 任何鼠标移动都算"交互"：重置空闲计时并取消正在播放的空闲动作
       lastInteractionRef.current = now;
       cancelIdle();
@@ -195,8 +200,6 @@ export function Avatar() {
     let unlistenGlobal: (() => void) | undefined;
     listen<{ x: number; y: number }>("global-mousemove", (event) => {
       const p = event.payload;
-      // [TEMP-VERIFY] 调试用：把全局光标坐标写进标题，验证 Rust→JS 链路
-      document.title = `GLOBAL:${p.x},${p.y}`;
       applyPointerViewport(p.x - window.screenX, p.y - window.screenY);
     }).then((fn) => {
       unlistenGlobal = fn;
@@ -364,7 +367,7 @@ export function Avatar() {
     <div className="avatar-root" ref={containerRef}>
       <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
-        <Body mood={mood} motion={motion} frame={frame} />
+        <RiggedGLBSkin mood={mood} />
       </div>
       <button
         className="touch-point"
