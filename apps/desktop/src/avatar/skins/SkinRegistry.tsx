@@ -1,6 +1,8 @@
 import { RiggedGLBSkin, BAG_CONFIG, ROBOT_CONFIG, type RigConfig } from "./RiggedGLBSkin";
+import { BagCharacterSkin, BagCharacterMVPSkin } from "./BagCharacterSkin";
 
 export { RiggedGLBSkin, BAG_CONFIG, ROBOT_CONFIG };
+export { BagCharacterSkin, BagCharacterMVPSkin };
 export type { RigConfig };
 
 /** 当前 MVP 默认身体：bag character（真·骨骼 + 动作片段，无脸） */
@@ -14,3 +16,6 @@ export const SKIN_REGISTRY: Record<string, RigConfig> = {
   "bag-character": BAG_CONFIG,
   "rigged-glb": ROBOT_CONFIG,
 };
+
+/** MVP 身体组件：消费 bag-character 配置 + 彻底解耦的 Adapter 引擎 */
+export const MVPSkin = BagCharacterMVPSkin;

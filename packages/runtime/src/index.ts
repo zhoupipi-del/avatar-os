@@ -11,3 +11,4 @@ export * from "./utils/throttle";
 export * from "./snapshot-manager";
 export * from "./agent-sandbox";
 export * from "./thoughts";
+export * from "./avatar-adapter";

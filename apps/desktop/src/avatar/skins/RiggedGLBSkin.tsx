@@ -18,6 +18,8 @@ export interface RigConfig {
   intentClip: Record<string, string>;
   /** 系统状态 → 片段名 */
   statusClip: Record<string, string>;
+  /** 姿态表情用的脊椎骨骼名（无面部 BlendShape 的模型靠它"演"情绪）；留空则不驱动姿态 */
+  spineBone: string;
   /** 自动取景目标高度（世界单位），相机固定 [0,0.3,5] fov35 */
   fitHeight: number;
 }
@@ -29,6 +31,7 @@ const ROBOT_CONFIG: RigConfig = {
   idleClip: "Idle",
   intentClip: { GREET: "Wave", BOUNCE_HAPPY: "Jump", STRETCH: "Wave", DOZE: "Sitting" },
   statusClip: { success: "ThumbsUp", error: "No" },
+  spineBone: "Spine",
   fitHeight: 2.4,
 };
 
@@ -44,6 +47,7 @@ const BAG_CONFIG: RigConfig = {
   idleClip: "NlaTrack",
   intentClip: { GREET: "NlaTrack.001", BOUNCE_HAPPY: "NlaTrack.002", STRETCH: "NlaTrack.001", DOZE: "NlaTrack" },
   statusClip: { success: "NlaTrack.002", error: "NlaTrack.001" },
+  spineBone: "Spine01",
   fitHeight: 2.6,
 };
 

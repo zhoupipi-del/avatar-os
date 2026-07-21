@@ -125,6 +125,13 @@ importers:
       '@avatar-os/sensor':
         specifier: workspace:*
         version: link:../sensor
+      three:
+        specifier: 0.169.0
+        version: 0.169.0
+    devDependencies:
+      '@types/three':
+        specifier: 0.169.0
+        version: 0.169.0
 
   packages/sensor:
     dependencies:

@@ -26,7 +26,7 @@ import {
   type SystemStatus,
 } from "@avatar-os/morphology";
 import { ThoughtBubble } from "./components/ThoughtBubble";
-import { RiggedGLBSkin } from "./skins/SkinRegistry";
+import { MVPSkin } from "./skins/SkinRegistry";
 import { gazeBus } from "./skins/gazeBus";
 import "./Avatar.css";
 
@@ -367,7 +367,7 @@ export function Avatar() {
     <div className="avatar-root" ref={containerRef}>
       <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
-        <RiggedGLBSkin mood={mood} />
+        <MVPSkin mood={mood} />
       </div>
       <button
         className="touch-point"
