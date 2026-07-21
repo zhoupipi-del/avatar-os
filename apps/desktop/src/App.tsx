@@ -6,6 +6,8 @@ import { memoryStore } from "@avatar-os/memory";
 import { eventBus, LifeLoop, behaviorVM, registerDefaultRules, AgentSandbox } from "@avatar-os/runtime";
 import { PresenceSensorLayer } from "@avatar-os/sensor";
 import { setClickThrough } from "./window/window-state";
+import { startCognition } from "./cognition/cognitionBootstrap";
+import { SpeechInput } from "./cognition/SpeechInput";
 
 const DRIVE_TICK_MS = 1000;
 
@@ -19,6 +21,7 @@ export default function App() {
     let lifeLoop: LifeLoop | null = null;
     let presenceLayer: PresenceSensorLayer | null = null;
     let unbindMood: (() => void) | null = null;
+    let stopCognition: (() => void) | null = null;
 
     const bootstrap = async () => {
       // 自举顺序：遥测订阅 → 记忆库初始化（建 SQLite 表）→ 行为规则注册
@@ -61,11 +64,16 @@ export default function App() {
         const drowsy = p.mood === "SLEEPING" || p.mood === "TIRED";
         void setClickThrough(drowsy);
       });
+
+      // 认知接线：把大脑皮层挂上运行中的桌面程序（SPEECH_INPUT→think、
+      // MEMORY_APPEND→memoryStore、孤独感自发思考）。返回清理函数。
+      stopCognition = startCognition();
     };
     void bootstrap();
 
     return () => {
       unbindMood?.();
+      stopCognition?.();
       lifeLoop?.stop();
       presenceLayer?.stop();
     };
@@ -82,6 +90,7 @@ export default function App() {
       }}
     >
       <Avatar />
+      <SpeechInput />
     </main>
   );
 }

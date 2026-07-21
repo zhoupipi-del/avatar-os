@@ -20,6 +20,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@avatar-os/cognition':
+        specifier: workspace:*
+        version: link:../../packages/cognition
       '@avatar-os/memory':
         specifier: workspace:*
         version: link:../../packages/memory
