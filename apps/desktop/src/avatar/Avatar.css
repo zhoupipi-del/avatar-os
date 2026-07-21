@@ -217,3 +217,18 @@
   0%, 100% { transform: rotate(0deg); }
   50%      { transform: rotate(-12deg) translateY(-4px); }
 }
+
+/* ---------- GREET / WAVE — 挥手致意 ---------- */
+/* 闭合原缺口：INTENT_TO_MOTION 把 GREET→"GREET"，此前无对应 limb 类，
+   导致挥手意图下来时四肢原地不动(只剩 mood=HAPPY 整体弹跳)。 */
+.limb-greet.arm-left  { animation: armWaveL 0.6s ease-in-out infinite; }
+.limb-greet.arm-right { animation: armWaveR 0.6s ease-in-out infinite; }
+
+@keyframes armWaveL {
+  0%, 100% { transform: rotate(-20deg); }
+  50%      { transform: rotate(-55deg) translateY(-6px); }
+}
+@keyframes armWaveR {
+  0%, 100% { transform: rotate(20deg); }
+  50%      { transform: rotate(55deg) translateY(-6px); }
+}

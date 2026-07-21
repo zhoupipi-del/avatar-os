@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@avatar-os/memory": "workspace:*",
+    "@avatar-os/morphology": "workspace:*",
     "@avatar-os/presence": "workspace:*",
     "@avatar-os/primitives": "workspace:*",
     "@avatar-os/runtime": "workspace:*",

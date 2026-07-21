@@ -53,8 +53,18 @@ export const Body: React.FC<BodyProps> = ({ mood, motion, frame, eyeOpenRatio = 
           fill={isHappy ? `url(#${happyGradId})` : `url(#${bodyGradId})`}
           className="avatar-body-circle"
         />
-        <Arms mood={mood} motion={motion} />
-        <Legs mood={mood} motion={motion} />
+        <Arms
+          mood={mood}
+          motion={motion}
+          angleL={frame.limbAngles?.armL ?? 0}
+          angleR={frame.limbAngles?.armR ?? 0}
+        />
+        <Legs
+          mood={mood}
+          motion={motion}
+          angleL={frame.limbAngles?.legL ?? 0}
+          angleR={frame.limbAngles?.legR ?? 0}
+        />
         <Eyes mood={mood} offset={frame.eyeOffset} openRatio={eyeOpenRatio} />
         <Mouth mood={mood} />
         <Particles mood={mood} />

@@ -23,6 +23,9 @@ importers:
       '@avatar-os/memory':
         specifier: workspace:*
         version: link:../../packages/memory
+      '@avatar-os/morphology':
+        specifier: workspace:*
+        version: link:../../packages/morphology
       '@avatar-os/presence':
         specifier: workspace:*
         version: link:../../packages/presence

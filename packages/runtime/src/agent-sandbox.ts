@@ -36,4 +36,16 @@ export class AgentSandbox {
     console.log(`[AgentSandbox 🟢] Dispatched external intent: ${intentType} (source=AI)`);
     return true;
   }
+
+  /**
+   * 注入系统/任务状态，驱动肢体宏观表情（与 PhysicalIntent 互补）：
+   * - "success"：双手举高欢呼（如测试全绿通过）
+   * - "error"：双手抱头瑟瑟发抖（如报错 / CPU 过载）
+   * - "idle"：恢复正常
+   * 经 kernelEventBus 广播 SYSTEM_STATUS_CHANGED，由 Avatar 订阅并映射为肢体角。
+   */
+  public static setSystemStatus(status: "idle" | "success" | "error"): void {
+    kernelEventBus.emit("SYSTEM_STATUS_CHANGED", { status });
+    console.log(`[AgentSandbox 🟢] System status → ${status}`);
+  }
 }

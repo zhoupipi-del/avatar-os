@@ -8,7 +8,8 @@ export type KernelEventType =
   | "PHYSICAL_INTENT_DISPATCH"
   | "STATE_MOOD_CHANGED"
   | "STATE_MOTION_CHANGED"
-  | "STATE_RENDER_PARAMS_CHANGED";
+  | "STATE_RENDER_PARAMS_CHANGED"
+  | "SYSTEM_STATUS_CHANGED";
 
 export interface KernelEventPayloads {
   SENSOR_MOUSE_MOVE: { x: number; y: number };
@@ -23,6 +24,7 @@ export interface KernelEventPayloads {
     bodyScale: number;
     gazeBias: { x: number; y: number };
   };
+  SYSTEM_STATUS_CHANGED: { status: "idle" | "success" | "error" };
 }
 
 type EventCallback<T> = (payload: T) => void;
