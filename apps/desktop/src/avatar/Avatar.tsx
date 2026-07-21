@@ -24,7 +24,7 @@ import {
   type SpringState,
   type SystemStatus,
 } from "@avatar-os/morphology";
-import { Body } from "./components/Body";
+import { SKIN_REGISTRY, CURRENT_SKIN_ID, setSkin } from "./skins/SkinRegistry";
 import { ThoughtBubble } from "./components/ThoughtBubble";
 import "./Avatar.css";
 
@@ -58,6 +58,8 @@ export function Avatar() {
     limbAngles: { ...REST_LIMB_ANGLES },
   });
   const [render, setRender] = useState<RenderParams>(DEFAULT_RENDER);
+  // 当前激活皮肤（控制台可热切换）
+  const [skinId, setSkinId] = useState<string>(CURRENT_SKIN_ID);
   // 最新渲染参数引用：供 mousemove 闭包读取，避免重注册监听
   const renderRef = useRef<RenderParams>(DEFAULT_RENDER);
 
@@ -122,6 +124,16 @@ export function Avatar() {
 
     // 启动想法气泡中继(情绪/意图/系统状态 → AVATAR_THOUGHT)
     const unbindRelay = initThoughtRelay();
+
+    // 皮肤热切换：控制台 window.__AVATAR_DEV__.setSkin('classic-2d'|'mecha-core'|'frieza-3d')
+    const onSkinChange = (e: Event) =>
+      setSkinId((e as CustomEvent<string>).detail);
+    window.addEventListener("avatar-skin-change", onSkinChange as EventListener);
+    // 暴露调试句柄：setSkin 切皮肤，setMood 直接驱动情绪（演示 3D 情绪色渐变）
+    (window as Window & typeof globalThis & { __AVATAR_DEV__?: unknown }).__AVATAR_DEV__ = {
+      setSkin,
+      setMood: (m: Mood) => eventBus.emit("STATE_MOOD_CHANGED", { mood: m }),
+    };
 
     const unbindMood = eventBus.on("STATE_MOOD_CHANGED", (p) => setMood(p.mood));
     const unbindMotion = eventBus.on("STATE_MOTION_CHANGED", (p) => setMotion(p.motion));
@@ -329,6 +341,7 @@ export function Avatar() {
     return () => {
       unbindRelay();
       unbindMood();
+      window.removeEventListener("avatar-skin-change", onSkinChange as EventListener);
       unbindMotion();
       unbindRender();
       unbindStatus();
@@ -340,11 +353,20 @@ export function Avatar() {
     };
   }, []);
 
+  const ActiveSkin = SKIN_REGISTRY[skinId] ?? SKIN_REGISTRY[CURRENT_SKIN_ID];
+
   return (
     <div className="avatar-root" ref={containerRef}>
       <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
-        <Body mood={mood} motion={motion} frame={frame} eyeOpenRatio={render.eyeOpenRatio} />
+        {ActiveSkin ? (
+          <ActiveSkin
+            mood={mood}
+            motion={motion}
+            frame={frame}
+            eyeOpenRatio={render.eyeOpenRatio}
+          />
+        ) : null}
       </div>
       <button
         className="touch-point"

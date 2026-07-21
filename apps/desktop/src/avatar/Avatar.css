@@ -20,6 +20,17 @@
   cursor: grabbing;
 }
 
+/* 3D 皮肤画布：填满拖拽区，透明背景（R3F Canvas 透传窗体透明） */
+.skin-3d {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.skin-3d canvas {
+  display: block;
+  outline: none;
+}
+
 /* SVG 本体：物理呼吸 Loop（与近场 scale / gaze 位移分属不同元素，互不覆盖） */
 .avatar-svg {
   width: 100%;
