@@ -27,6 +27,10 @@ export const Body: React.FC<BodyProps> = ({ mood, motion, frame, eyeOpenRatio = 
     mood === Mood.HAPPY || mood === Mood.PLAYFUL || mood === Mood.EXCITED;
   const motionClass = motion ? `motion-${motion.toLowerCase()}` : "";
 
+  // 随机行为树驱动的整体倾斜/浮动，与 bodyScale 同组叠加(不覆盖呼吸 CSS)
+  const headTilt = frame.headTilt ?? 0;
+  const bodyBob = frame.bodyBob ?? 0;
+
   return (
     <svg
       viewBox="0 0 120 155"
@@ -45,7 +49,12 @@ export const Body: React.FC<BodyProps> = ({ mood, motion, frame, eyeOpenRatio = 
         </radialGradient>
       </defs>
 
-      <g className="body-scale" style={{ transform: `scale(${frame.bodyScale})` }}>
+      <g
+        className="body-scale"
+        style={{
+          transform: `translateY(${bodyBob}px) rotate(${headTilt}deg) scale(${frame.bodyScale})`,
+        }}
+      >
         <circle
           cx="60"
           cy="60"

@@ -175,12 +175,21 @@ export function systemStatusToLimbs(status: SystemStatus, tMs: number): LimbAngl
 // ============================================================
 
 export function composeLimbAngles(parts: {
+  /** 随机行为树底层：空闲微动作，优先级最低，被后续交互层覆盖 */
+  idle?: LimbAngles;
   reach?: LimbAngles;
   typing?: LimbAngles;
   ragdoll?: LimbAngles;
   status?: LimbAngles;
 }): LimbAngles {
   const out: LimbAngles = { ...REST_LIMB_ANGLES };
+  // idle 作为最底层：萌物无人交互时的自发性小动作
+  if (parts.idle) {
+    out.armL += parts.idle.armL;
+    out.armR += parts.idle.armR;
+    out.legL += parts.idle.legL;
+    out.legR += parts.idle.legR;
+  }
   if (parts.reach) {
     out.armL += parts.reach.armL;
     out.armR += parts.reach.armR;

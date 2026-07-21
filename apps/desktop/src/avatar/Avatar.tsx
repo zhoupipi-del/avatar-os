@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Mood } from "@avatar-os/primitives";
-import { eventBus, avatarFSM } from "@avatar-os/runtime";
+import { eventBus, avatarFSM, initThoughtRelay, kernelEventBus } from "@avatar-os/runtime";
 import { mouseSensor } from "../sensor/MouseSensor";
 import { calculateFrame, VisualFrame } from "../renderer/visual-transform";
 import {
@@ -16,10 +16,16 @@ import {
   systemStatusToLimbs,
   composeLimbAngles,
   REST_LIMB_ANGLES,
+  IDLE_BEHAVIORS,
+  idlePoseAt,
+  nextIdleDelay,
+  pickIdleBehavior,
+  type IdleBehaviorType,
   type SpringState,
   type SystemStatus,
 } from "@avatar-os/morphology";
 import { Body } from "./components/Body";
+import { ThoughtBubble } from "./components/ThoughtBubble";
 import "./Avatar.css";
 
 interface RenderParams {
@@ -80,10 +86,42 @@ export function Avatar() {
   });
   const statusRef = useRef<SystemStatus>("idle");
 
+  // ---- 随机行为树：空闲微动作调度状态 ----
+  // 萌物无人交互超过 nextDelay 后，随机挑一个空闲小动作播放；
+  // 任何交互(鼠标移动/按键/拖拽)立即取消当前动作并重置计时。
+  interface IdleState {
+    phase: "WAITING" | "PLAYING";
+    type?: IdleBehaviorType;
+    startedAt?: number;
+    nextDelay: number; // 下次触发前的随机等待(ms)
+  }
+  const idleRef = useRef<IdleState>({
+    phase: "WAITING",
+    type: undefined,
+    startedAt: undefined,
+    nextDelay: nextIdleDelay(Math.random),
+  });
+  // 最近一次交互时刻：用于判断"是否空闲足够久"
+  const lastInteractionRef = useRef<number>(Date.now());
+
+  /** 取消正在播放的空闲动作并重置计时（交互发生时调用） */
+  const cancelIdle = () => {
+    const idle = idleRef.current;
+    if (idle.phase === "PLAYING") {
+      idle.phase = "WAITING";
+      idle.type = undefined;
+      idle.startedAt = undefined;
+      idle.nextDelay = nextIdleDelay(Math.random);
+    }
+  };
+
   useEffect(() => {
     if (containerRef.current) {
       mouseSensor.init(containerRef.current);
     }
+
+    // 启动想法气泡中继(情绪/意图/系统状态 → AVATAR_THOUGHT)
+    const unbindRelay = initThoughtRelay();
 
     const unbindMood = eventBus.on("STATE_MOOD_CHANGED", (p) => setMood(p.mood));
     const unbindMotion = eventBus.on("STATE_MOTION_CHANGED", (p) => setMotion(p.motion));
@@ -127,6 +165,10 @@ export function Avatar() {
       // F1: 光标 → SVG 坐标, 供 gesture tick 算够指针角
       svgCursorRef.current = clientToSvg(e.clientX, e.clientY, rect);
 
+      // 任何鼠标移动都算"交互"：重置空闲计时并取消正在播放的空闲动作
+      lastInteractionRef.current = now;
+      cancelIdle();
+
       // F3: 拖拽中 → 由移动差分推导甩动加速度
       const d = dragRef.current;
       if (d.active) {
@@ -144,6 +186,8 @@ export function Avatar() {
     // F2: 键盘打字强度采集
     const onKeyDown = () => {
       keyTimesRef.current.push(performance.now());
+      lastInteractionRef.current = Date.now();
+      cancelIdle();
     };
     window.addEventListener("keydown", onKeyDown);
 
@@ -162,6 +206,8 @@ export function Avatar() {
         d.springs.legL = { angle: d.springs.legL.angle, vel: 20 };
         d.springs.legR = { angle: d.springs.legR.angle, vel: -20 };
       }
+      lastInteractionRef.current = Date.now();
+      cancelIdle();
     };
     const onMouseUp = () => {
       dragRef.current.active = false;
@@ -170,20 +216,66 @@ export function Avatar() {
     window.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mouseup", onMouseUp);
 
-    // ---- gesture tick: 120ms 合成肢体角 (F1/F2/F3/F4) ----
+    // ---- gesture tick: 120ms 合成肢体角 (F1/F2/F3/F4 + 随机行为树) ----
     const tick = window.setInterval(() => {
       const t = performance.now();
+      const now = Date.now();
+
+      // ===== 随机行为树：空闲微动作调度 =====
+      // 无人交互超过 nextDelay → 随机挑一个动作播放；播放期间接管双臂，
+      // 并冒一个"想法气泡"。任何交互已在事件回调里取消当前动作并重置计时。
+      const idle = idleRef.current;
+      let idleLayer = REST_LIMB_ANGLES;
+      let headTilt = 0;
+      let bodyBob = 0;
+
+      if (idle.phase === "WAITING") {
+        if (now - lastInteractionRef.current > idle.nextDelay) {
+          const type = pickIdleBehavior(Math.random);
+          idle.phase = "PLAYING";
+          idle.type = type;
+          idle.startedAt = now;
+          const def = IDLE_BEHAVIORS[type];
+          // 同步冒想法气泡(时长对齐动作，source=IDLE 避免与情绪总线重复)
+          kernelEventBus.emit("AVATAR_THOUGHT", {
+            emoji: def.thought.emoji,
+            text: def.thought.text,
+            kind: "thought",
+            source: "IDLE",
+            durationMs: def.durationMs,
+          });
+        }
+      } else {
+        const def = IDLE_BEHAVIORS[idle.type!];
+        const elapsed = now - idle.startedAt!;
+        if (elapsed >= def.durationMs) {
+          // 动作结束：回到等待，重算下次等待，并把空闲基线顺延到此刻
+          idle.phase = "WAITING";
+          idle.type = undefined;
+          idle.startedAt = undefined;
+          idle.nextDelay = nextIdleDelay(Math.random);
+          lastInteractionRef.current = now;
+        } else {
+          const r = idlePoseAt(def, elapsed, t);
+          idleLayer = r.angles;
+          headTilt = r.tilt;
+          bodyBob = r.bob;
+        }
+      }
 
       // F1 鼠标引力: 双手随光标 IK 够指针
+      // 空闲动作播放时接管双臂，屏蔽静止光标的"残留够指"
       let reach = REST_LIMB_ANGLES;
-      const cur = svgCursorRef.current;
-      if (cur) {
-        reach = {
-          armL: computeArmReachAngle(SHOULDER_L, cur, { side: "L" }),
-          armR: computeArmReachAngle(SHOULDER_R, cur, { side: "R" }),
-          legL: 0,
-          legR: 0,
-        };
+      if (idle.phase !== "PLAYING") {
+        const cur = svgCursorRef.current;
+        if (cur) {
+          reach = {
+            armL: computeArmReachAngle(SHOULDER_L, cur, { side: "L" }),
+            armR: computeArmReachAngle(SHOULDER_R, cur, { side: "R" }),
+            legL: 0,
+            legR: 0,
+          };
+        }
       }
 
       // F2 键盘同步: 打字强度 → 胸前虚空打字 / 轻敲挠头
@@ -213,15 +305,29 @@ export function Avatar() {
       };
       d.accel *= 0.82; // 拖拽停止后衰减
 
-      // F4 系统状态: 欢呼 / 抱头 (覆盖双臂)
+      // F4 系统状态: 欢呼 / 抱头 (覆盖双臂，优先级最高)
       const status = statusRef.current;
       const statusAngles = status !== "idle" ? systemStatusToLimbs(status, t) : undefined;
 
-      const final = composeLimbAngles({ reach, typing, ragdoll, status: statusAngles });
-      setFrame((f) => ({ ...f, limbAngles: final }));
+      // 合成：idle(最底) → reach → typing → ragdoll → status(最高)
+      const final = composeLimbAngles({
+        idle: idleLayer,
+        reach,
+        typing,
+        ragdoll,
+        status: statusAngles,
+      });
+      // 函数式更新: 保留 eyeOffset/bodyScale，叠加 idle 头部倾斜/浮动
+      setFrame((f) => ({
+        ...f,
+        limbAngles: final,
+        headTilt,
+        bodyBob,
+      }));
     }, 120);
 
     return () => {
+      unbindRelay();
       unbindMood();
       unbindMotion();
       unbindRender();
@@ -236,6 +342,7 @@ export function Avatar() {
 
   return (
     <div className="avatar-root" ref={containerRef}>
+      <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
         <Body mood={mood} motion={motion} frame={frame} eyeOpenRatio={render.eyeOpenRatio} />
       </div>

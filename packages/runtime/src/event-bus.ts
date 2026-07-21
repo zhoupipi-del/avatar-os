@@ -1,4 +1,4 @@
-import { PhysicalIntent } from "@avatar-os/primitives";
+import { Mood, PhysicalIntent } from "@avatar-os/primitives";
 
 export type KernelEventType =
   | "SENSOR_MOUSE_MOVE"
@@ -9,7 +9,8 @@ export type KernelEventType =
   | "STATE_MOOD_CHANGED"
   | "STATE_MOTION_CHANGED"
   | "STATE_RENDER_PARAMS_CHANGED"
-  | "SYSTEM_STATUS_CHANGED";
+  | "SYSTEM_STATUS_CHANGED"
+  | "AVATAR_THOUGHT";
 
 export interface KernelEventPayloads {
   SENSOR_MOUSE_MOVE: { x: number; y: number };
@@ -17,7 +18,7 @@ export interface KernelEventPayloads {
   SENSOR_MOUSE_FAR: void;
   DRIVE_PRESSURE_TICK: { timestamp: number };
   PHYSICAL_INTENT_DISPATCH: PhysicalIntent;
-  STATE_MOOD_CHANGED: { mood: string };
+  STATE_MOOD_CHANGED: { mood: Mood };
   STATE_MOTION_CHANGED: { motion: string };
   STATE_RENDER_PARAMS_CHANGED: {
     eyeOpenRatio: number;
@@ -25,6 +26,17 @@ export interface KernelEventPayloads {
     gazeBias: { x: number; y: number };
   };
   SYSTEM_STATUS_CHANGED: { status: "idle" | "success" | "error" };
+  /** 状态/想法气泡：由情绪/意图/系统状态/空闲行为树统一发射，驱动 ThoughtBubble 渲染 */
+  AVATAR_THOUGHT: {
+    emoji: string;
+    text: string;
+    /** thought=自主想法/情绪反馈; state=状态播报(如系统成功/失败) */
+    kind: "thought" | "state";
+    /** 自动淡出时长(ms)，缺省由组件决定 */
+    durationMs?: number;
+    /** 来源标记: MOOD / INTENT / SYSTEM / IDLE */
+    source?: string;
+  };
 }
 
 type EventCallback<T> = (payload: T) => void;
