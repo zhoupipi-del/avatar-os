@@ -5,3 +5,4 @@ export * from "./expression-interface";
 export * from "./animation-manager";
 export * from "./behavior-bridge";
 export * from "./capabilities";
+export * from "./embodiment-runtime";

@@ -6,7 +6,12 @@ import {
   AnimationManager,
   BagCharacterExpression,
   BehaviorVMAdapter,
+  EmbodimentRuntime,
+  kernelEventBus,
+  driveEngine,
+  type AvatarLifeState,
 } from "@avatar-os/runtime";
+import { NEUTRAL_EMOTIONAL_STATE } from "@avatar-os/primitives";
 import { gazeBus } from "./gazeBus";
 import { moodEmissive } from "./moodColor";
 import { findBone, findBoneByName } from "./rigCommon";
@@ -40,10 +45,19 @@ function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
 
     const animation = new AnimationManager(mixer, actions, { idleClip: config.idleClip });
     const expression = new BagCharacterExpression(spine);
-    const bridge = new BehaviorVMAdapter(animation, expression, {
-      idleClip: config.idleClip,
-      intentClip: config.intentClip,
-      statusClip: config.statusClip,
+    const embodiment = new EmbodimentRuntime();
+    const bridge = new BehaviorVMAdapter(animation, expression, embodiment, {
+      // RigConfig 结构性满足 PrimitiveBindings（intentClip/statusClip/idleClip/spineBone）
+      bindings: config,
+      capability: capabilities,
+      getLife: (): AvatarLifeState => ({
+        life: driveEngine.getState(),
+        emotion: NEUTRAL_EMOTIONAL_STATE,
+        presence: { userNearby: true, isFocused: false },
+      }),
+      // 气泡复用现有 AVATAR_THOUGHT 事件，不发明新通道
+      onSpeech: (text) =>
+        kernelEventBus.emit("AVATAR_THOUGHT", { emoji: "💬", text, kind: "thought", source: "INTENT" }),
     });
 
     engineRef.current = { animation, expression, bridge };

@@ -37,6 +37,7 @@ export function useAvatarLoader(modelUrl: string, targetHeight = 2.0): LoadedAva
     let hasSkeleton = false;
     let hasBlendShapes = false;
     const skeletonBoneNames: string[] = [];
+    const availableBlendShapes: string[] = [];
 
     scene.traverse((child: THREE.Object3D) => {
       const mesh = child as THREE.Mesh;
@@ -51,7 +52,10 @@ export function useAvatarLoader(modelUrl: string, targetHeight = 2.0): LoadedAva
           }
           mat.needsUpdate = true;
         }
-        if (mesh.morphTargetDictionary) hasBlendShapes = true;
+        if (mesh.morphTargetDictionary) {
+          hasBlendShapes = true;
+          availableBlendShapes.push(...Object.keys(mesh.morphTargetDictionary));
+        }
       }
       const bone = child as THREE.Bone;
       if (bone.isBone) {
@@ -74,11 +78,27 @@ export function useAvatarLoader(modelUrl: string, targetHeight = 2.0): LoadedAva
       -center.z * scale,
     ];
 
+    // 能力标签：扫描器结论，供 EmbodimentRuntime 决定降级策略
+    const features: AvatarCapabilities["features"] = [];
+    if (hasSkeleton) {
+      features.push("procedural_look_at", "procedural_breathing");
+      if (animations.length > 0) features.push("prebaked_animation");
+    }
+    if (hasBlendShapes) features.push("facial_expression");
+
     const caps: AvatarCapabilities = {
       hasSkeleton,
       hasBlendShapes,
       availableAnimations: animations.map((a) => a.name),
       skeletonBoneNames,
+      // Embodiment 扩展字段
+      supportedBones: skeletonBoneNames,
+      availableClips: animations.map((a) => ({ name: a.name, duration: a.duration })),
+      features,
+      // 情绪染色(emissive)由 STATE_MOOD_CHANGED 路径经 ExpressionController 覆盖，
+      // 不在此重复 emit MATERIAL_GLOW，避免双重发光
+      hasMaterialEmotion: false,
+      availableBlendShapes,
     };
     return { capabilities: caps, transform: { scale, position } };
   }, [scene, animations, targetHeight]);

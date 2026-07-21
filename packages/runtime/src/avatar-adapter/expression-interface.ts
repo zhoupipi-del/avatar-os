@@ -21,6 +21,10 @@ export interface ExpressionController {
   drowsy(): void;
   /** 平静：恢复自然直立 */
   idle(): void;
+  /** 意图驱动的躯干倾斜（无动画时的身体动作降级）：angleXDeg>0 前倾，<0 后仰 */
+  lean(angleXDeg: number): void;
+  /** 意图驱动的侧倾（歪头）：angleZDeg>0 向右，<0 向左 */
+  tilt(angleZDeg: number): void;
   /** 每帧推进：把目标姿态平滑 lerp 到骨骼上（由渲染层 useFrame 调用） */
   update(delta: number): void;
 }
@@ -85,6 +89,14 @@ export class BagCharacterExpression implements ExpressionController {
 
   public idle(): void {
     this.target.set(0, 0, 0);
+  }
+
+  public lean(angleXDeg: number): void {
+    this.target.set(THREE.MathUtils.degToRad(angleXDeg), 0, this.target.z);
+  }
+
+  public tilt(angleZDeg: number): void {
+    this.target.set(this.target.x, 0, THREE.MathUtils.degToRad(angleZDeg));
   }
 
   public update(delta: number): void {

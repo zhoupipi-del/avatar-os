@@ -2,9 +2,11 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import * as THREE from "three";
 import { AnimationManager } from "../src/avatar-adapter/animation-manager";
 import { BehaviorVMAdapter } from "../src/avatar-adapter/behavior-bridge";
+import { EmbodimentRuntime, type AvatarLifeState } from "../src/avatar-adapter/embodiment-runtime";
+import type { AvatarCapabilities } from "../src/avatar-adapter/capabilities";
 import { BagCharacterExpression, moodToExpression } from "../src/avatar-adapter/expression-interface";
 import { kernelEventBus } from "../src/event-bus";
-import { Mood } from "@avatar-os/primitives";
+import { Mood, NEUTRAL_EMOTIONAL_STATE } from "@avatar-os/primitives";
 
 describe("AnimationManager", () => {
   const makeAction = () => {
@@ -101,6 +103,8 @@ describe("BehaviorVMAdapter", () => {
       thinking: vi.fn(),
       drowsy: vi.fn(),
       idle: vi.fn(),
+      lean: vi.fn(),
+      tilt: vi.fn(),
       update: vi.fn(),
     } as any,
   });
@@ -110,6 +114,37 @@ describe("BehaviorVMAdapter", () => {
     intentClip: { GREET: "NlaTrack.001", BOUNCE_HAPPY: "NlaTrack.002" } as Record<string, string>,
     statusClip: { success: "NlaTrack.002", error: "NlaTrack.001" } as Record<string, string>,
   };
+
+  // 真实 bag-character 能力图谱（无脸、有脊椎骨、有 3 个 NLA 片段）
+  const caps: AvatarCapabilities = {
+    hasSkeleton: true,
+    hasBlendShapes: false,
+    availableAnimations: ["NlaTrack", "NlaTrack.001", "NlaTrack.002"],
+    skeletonBoneNames: ["Spine01", "Head"],
+    supportedBones: ["Spine01", "Head"],
+    availableClips: [
+      { name: "NlaTrack", duration: 4 },
+      { name: "NlaTrack.001", duration: 2.58 },
+      { name: "NlaTrack.002", duration: 12.79 },
+    ],
+    features: ["procedural_look_at", "prebaked_animation"],
+    hasMaterialEmotion: false,
+    availableBlendShapes: [],
+  };
+
+  const life: AvatarLifeState = {
+    life: { energy: 1, socialNeed: 0.2, curiosity: 0.5, pressures: { fatiguePressure: 0, lonelinessPressure: 0, curiosityPressure: 0 } },
+    emotion: NEUTRAL_EMOTIONAL_STATE,
+    presence: { userNearby: true, isFocused: false },
+  };
+
+  const makeBridge = (mocks: ReturnType<typeof makeMocks>, onSpeech = vi.fn()) =>
+    new BehaviorVMAdapter(mocks.animation, mocks.expression, new EmbodimentRuntime(), {
+      bindings: maps,
+      capability: caps,
+      getLife: () => life,
+      onSpeech,
+    });
 
   afterEach(() => {
     // 确保测试间不残留订阅
@@ -123,9 +158,10 @@ describe("BehaviorVMAdapter", () => {
     });
   });
 
-  it("物理意图 → 对应片段 playOnce", () => {
-    const { animation, expression } = makeMocks();
-    const bridge = new BehaviorVMAdapter(animation, expression, maps);
+  it("物理意图 → EmbodimentRuntime 编译 → 对应片段 playOnce + 气泡", () => {
+    const mocks = makeMocks();
+    const onSpeech = vi.fn();
+    const bridge = makeBridge(mocks, onSpeech);
     bridge.connect();
     kernelEventBus.emit("PHYSICAL_INTENT_DISPATCH", {
       type: "GREET",
@@ -135,31 +171,32 @@ describe("BehaviorVMAdapter", () => {
       confidence: 1,
       timestamp: Date.now(),
     });
-    expect(animation.playOnce).toHaveBeenCalledWith("NlaTrack.001");
+    expect(mocks.animation.playOnce).toHaveBeenCalledWith("NlaTrack.001");
+    expect(onSpeech).toHaveBeenCalledWith("你回来啦！");
     bridge.disconnect();
   });
 
   it("情绪 → 对应表情方法", () => {
-    const { animation, expression } = makeMocks();
-    const bridge = new BehaviorVMAdapter(animation, expression, maps);
+    const mocks = makeMocks();
+    const bridge = makeBridge(mocks);
     bridge.connect();
     kernelEventBus.emit("STATE_MOOD_CHANGED", { mood: Mood.SAD });
-    expect(expression.sad).toHaveBeenCalled();
+    expect(mocks.expression.sad).toHaveBeenCalled();
     bridge.disconnect();
   });
 
   it("系统状态 → 对应片段 playOnce", () => {
-    const { animation, expression } = makeMocks();
-    const bridge = new BehaviorVMAdapter(animation, expression, maps);
+    const mocks = makeMocks();
+    const bridge = makeBridge(mocks);
     bridge.connect();
     kernelEventBus.emit("SYSTEM_STATUS_CHANGED", { status: "success" });
-    expect(animation.playOnce).toHaveBeenCalledWith("NlaTrack.002");
+    expect(mocks.animation.playOnce).toHaveBeenCalledWith("NlaTrack.002");
     bridge.disconnect();
   });
 
   it("disconnect 后不再响应事件", () => {
-    const { animation, expression } = makeMocks();
-    const bridge = new BehaviorVMAdapter(animation, expression, maps);
+    const mocks = makeMocks();
+    const bridge = makeBridge(mocks);
     bridge.connect();
     bridge.disconnect();
     kernelEventBus.emit("PHYSICAL_INTENT_DISPATCH", {
@@ -170,6 +207,6 @@ describe("BehaviorVMAdapter", () => {
       confidence: 1,
       timestamp: Date.now(),
     });
-    expect(animation.playOnce).not.toHaveBeenCalled();
+    expect(mocks.animation.playOnce).not.toHaveBeenCalled();
   });
 });
