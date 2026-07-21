@@ -24,20 +24,24 @@ export class SQLiteStorageAdapter implements StorageAdapter {
     if (this.db) return;
     try {
       this.db = await Database.load(DB_PATH);
+      // 注意：tauri-plugin-sql 底层 rusqlite 的 execute 单次只接受一条语句，
+      // 多条语句会抛 "cannot execute multiple statements"，必须拆分。
       await this.db.execute(
         `CREATE TABLE IF NOT EXISTS user_profile (
            key TEXT PRIMARY KEY,
            value TEXT NOT NULL,
            confidence REAL DEFAULT 1.0,
            updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS lifecycle_event (
+         )`,
+      );
+      await this.db.execute(
+        `CREATE TABLE IF NOT EXISTS lifecycle_event (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
            event_type TEXT NOT NULL,
            payload TEXT,
            importance_score REAL DEFAULT 0.5,
            timestamp INTEGER NOT NULL
-         );`,
+         )`,
       );
       console.log("[SQLiteStorageAdapter 🗄️] SQLite database linked and schema ensured.");
     } catch (err) {
