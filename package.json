@@ -1,0 +1,15 @@
+{
+  "name": "avatar-os",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter desktop dev",
+    "build": "pnpm --recursive run build"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "prettier": "^3.2.0"
+  }
+}

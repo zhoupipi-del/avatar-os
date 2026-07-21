@@ -1,0 +1,12 @@
+{
+  "name": "@avatar-os/runtime",
+  "version": "0.1.0-alpha",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@avatar-os/primitives": "workspace:*",
+    "@avatar-os/memory": "workspace:*",
+    "@avatar-os/sensor": "workspace:*",
+    "@avatar-os/morphology": "workspace:*"
+  }
+}

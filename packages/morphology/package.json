@@ -1,0 +1,9 @@
+{
+  "name": "@avatar-os/morphology",
+  "version": "0.1.0-alpha",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@avatar-os/primitives": "workspace:*"
+  }
+}

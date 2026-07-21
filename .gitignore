@@ -1,0 +1,46 @@
+# ===== 依赖 =====
+node_modules/
+.pnpm-store/
+
+# ===== 构建产物 =====
+dist/
+dist-ssr/
+*.local
+
+# ===== Rust / Tauri 编译产物（源码保留）=====
+src-tauri/target/
+**/target/
+
+# ===== 环境变量（保留 .env.example 模板）=====
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ===== 日志 =====
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===== 临时目录 =====
+_tmp_*
+tmp/
+temp/
+
+# ===== Vite 临时缓存 =====
+vite.config.ts.timestamp-*.mjs
+
+# ===== 编辑器 / 系统 =====
+.DS_Store
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ===== 测试覆盖 =====
+coverage/
+
+# ===== TypeScript 增量编译缓存 =====
+*.tsbuildinfo

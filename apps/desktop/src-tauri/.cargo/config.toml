@@ -1,0 +1,4 @@
+# Redirect cargo build artifacts to D: drive to avoid filling up C: (only 4.6GB free).
+# Tauri dev's first compile produces 1-3GB in target dir.
+[build]
+target-dir = "D:\\cargo-target"

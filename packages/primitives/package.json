@@ -1,0 +1,6 @@
+{
+  "name": "@avatar-os/primitives",
+  "version": "0.1.0-alpha",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

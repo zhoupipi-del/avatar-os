@@ -1,0 +1,219 @@
+.avatar-root {
+  width: 180px;
+  height: 220px;
+  margin: 10px auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 拖拽区：Tauri 无边框窗由 data-tauri-drag-region 接管拖拽 */
+.drag-region-wrap {
+  width: 150px;
+  height: 180px;
+  cursor: grab;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.drag-region-wrap:active {
+  cursor: grabbing;
+}
+
+/* SVG 本体：物理呼吸 Loop（与近场 scale / gaze 位移分属不同元素，互不覆盖） */
+.avatar-svg {
+  width: 100%;
+  height: 100%;
+  animation: breathing 4s ease-in-out infinite;
+}
+
+/* 昼夜生理沉睡：夜间能量回落进入 SLEEPING，呼吸节奏拉长至 6.5s（L3 审计） */
+.mood-sleeping .avatar-svg {
+  animation: breathing 6.5s ease-in-out infinite;
+  opacity: 0.82;
+}
+
+@keyframes breathing {
+  0%,
+  100% {
+    transform: translateY(0px) scale(1, 1);
+  }
+  50% {
+    transform: translateY(-6px) scale(1.03, 0.97);
+  }
+}
+
+/* 自主微动作：由 Presence Engine 经 STATE_MOTION_CHANGED 驱动 */
+.motion-stretch {
+  animation: stretch 2.5s ease-in-out !important;
+}
+
+@keyframes stretch {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.12) translateY(-4px);
+  }
+}
+
+.motion-look_around {
+  animation: lookAround 3s ease-in-out !important;
+}
+
+@keyframes lookAround {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-4deg);
+  }
+  75% {
+    transform: rotate(4deg);
+  }
+}
+
+.motion-blink .blink-eye {
+  animation: blink 0.3s ease !important;
+}
+
+/* 眼睛自动眨眼：与 <g> 的 gaze 位移分属不同元素，互不覆盖 */
+.blink-eye {
+  animation: blink 5s infinite;
+  transform-origin: center;
+}
+
+@keyframes blink {
+  0%,
+  94%,
+  98%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+
+/* 开心/调皮/兴奋：覆盖呼吸动画 */
+.mood-happy,
+.mood-playful,
+.mood-excited {
+  animation: happyBounce 0.4s ease infinite alternate !important;
+}
+
+@keyframes happyBounce {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-12px);
+  }
+}
+
+/* 粒子层：开心态漂浮 */
+.avatar-particles .particle {
+  animation: float 1.6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+/* 20% 交互触控点 */
+.touch-point {
+  position: absolute;
+  top: 35px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  outline: none;
+  z-index: 10;
+}
+
+/* ===== 四肢系统 (Arms + Legs) ===== */
+
+/* 每个肢体以肩/髋关节为 transform-origin */
+.arm-left  { transform-origin: 22px 48px; }
+.arm-right { transform-origin: 98px 48px; }
+.leg-left  { transform-origin: 42px 106px; }
+.leg-right { transform-origin: 78px 106px; }
+
+/* ---------- BREATH — 呼吸微摆 ---------- */
+.limb-breath.arm-left  { animation: armSwayIn  4s ease-in-out infinite; }
+.limb-breath.arm-right { animation: armSwayOut 4s ease-in-out infinite; }
+.limb-breath.leg-left  { animation: legRock 4s ease-in-out infinite; }
+.limb-breath.leg-right { animation: legRock 4s ease-in-out 0.5s infinite; }
+
+@keyframes armSwayIn {
+  0%, 100% { transform: rotate(1deg); }
+  50%      { transform: rotate(-2deg); }
+}
+@keyframes armSwayOut {
+  0%, 100% { transform: rotate(-1deg); }
+  50%      { transform: rotate(2deg); }
+}
+@keyframes legRock {
+  0%, 100% { transform: rotate(0deg); }
+  50%      { transform: rotate(1.5deg); }
+}
+
+/* ---------- STRETCH — 伸懒腰 ---------- */
+.limb-stretch.arm-left  { animation: armReachUp   2.5s ease-in-out; }
+.limb-stretch.arm-right { animation: armReachUp   2.5s ease-in-out 0.1s; }
+.limb-stretch.leg-left  { animation: legReachDown 2.5s ease-in-out; }
+.limb-stretch.leg-right { animation: legReachDown 2.5s ease-in-out; }
+
+@keyframes armReachUp {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  40%, 60% { transform: rotate(-38deg) translateY(-10px); }
+}
+@keyframes legReachDown {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  40%, 60% { transform: rotate(4deg) translateY(3px); }
+}
+
+/* ---------- HAPPY_BOUNCE — 开心蹦跳 ---------- */
+.limb-happy_bounce.arm-left  { animation: armCheer 0.4s ease-in-out infinite; }
+.limb-happy_bounce.arm-right { animation: armCheer 0.4s ease-in-out 0.06s infinite; }
+.limb-happy_bounce.leg-left  { animation: legSquish 0.4s ease-in-out infinite; }
+.limb-happy_bounce.leg-right { animation: legSquish 0.4s ease-in-out 0.1s infinite; }
+
+@keyframes armCheer {
+  0%, 100% { transform: rotate(-22deg) translateY(-6px); }
+  50%      { transform: rotate(-28deg) translateY(-12px); }
+}
+@keyframes legSquish {
+  0%, 100% { transform: scaleY(1)   translateY(0); }
+  50%      { transform: scaleY(0.8) translateY(5px); }
+}
+
+/* ---------- DOZE — 打盹松垂 ---------- */
+.limb-doze.arm-left  { transform: rotate(16deg) translateY(8px); transition: transform 2s ease; }
+.limb-doze.arm-right { transform: rotate(-16deg) translateY(8px); transition: transform 2s ease; }
+.limb-doze.leg-left  { transform: rotate(6deg) translateY(5px); transition: transform 2s ease; }
+.limb-doze.leg-right { transform: rotate(-6deg) translateY(5px); transition: transform 2s ease; }
+
+/* ---------- CURIOUS / FOCUSED — 好奇微抬 ---------- */
+.limb-curious.arm-left,
+.limb-focused.arm-left  { animation: armCurious 3s ease-in-out infinite; }
+.limb-curious.arm-right,
+.limb-focused.arm-right { animation: armCurious 3s ease-in-out 0.6s infinite; }
+
+@keyframes armCurious {
+  0%, 100% { transform: rotate(0deg); }
+  50%      { transform: rotate(-12deg) translateY(-4px); }
+}
