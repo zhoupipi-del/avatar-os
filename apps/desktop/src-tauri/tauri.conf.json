@@ -28,6 +28,11 @@
       "csp": null
     }
   },
+  "plugins": {
+    "sql": {
+      "preload": ["sqlite:avatar_memory.db"]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

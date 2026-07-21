@@ -9,6 +9,7 @@ fn set_ignore_cursor_events<R: Runtime>(window: WebviewWindow<R>, ignore: bool) 
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_sql::Builder::default().build())
         .invoke_handler(tauri::generate_handler![set_ignore_cursor_events])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();

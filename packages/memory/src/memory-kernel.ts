@@ -92,33 +92,34 @@ export class MemoryKernel {
   }
 
   public async init(): Promise<void> {
-    this.adapter.init();
+    await this.adapter.init();
+    const profileCount = (await this.adapter.getAllUserProfile()).length;
     console.log(
-      `[MemoryKernel] initialized. profiles=${this.adapter.getAllUserProfile().length}, ` +
+      `[MemoryKernel] initialized. profiles=${profileCount}, ` +
         `DDL: user_profile + interaction_log + emotion_memory`,
     );
   }
 
   // ------- User Profile -------
 
-  public saveProfile(key: string, value: string, confidence = 1.0): void {
+  public async saveProfile(key: string, value: string, confidence = 1.0): Promise<void> {
     const rec: UserProfileRecord = { key, value, confidence, updatedAt: Date.now() };
-    this.adapter.upsertUserProfile(rec);
+    await this.adapter.upsertUserProfile(rec);
   }
 
-  public getProfile(key: string): MemoryUserProfile | null {
-    const rec = this.adapter.getUserProfile(key);
+  public async getProfile(key: string): Promise<MemoryUserProfile | null> {
+    const rec = await this.adapter.getUserProfile(key);
     if (!rec) return null;
     return { key: rec.key, value: rec.value, confidence: rec.confidence, updatedAt: rec.updatedAt };
   }
 
   // ------- Interaction Log -------
 
-  public recordInteraction(event: {
+  public async recordInteraction(event: {
     eventType: string;
     payload?: string;
     importanceScore?: number;
-  }): void {
+  }): Promise<void> {
     const row: LifecycleEventRecord = {
       id: 0,
       eventType: event.eventType,
@@ -126,7 +127,7 @@ export class MemoryKernel {
       importanceScore: event.importanceScore ?? 0.5,
       timestamp: Date.now(),
     };
-    this.adapter.insertLifecycleEvent(row);
+    await this.adapter.insertLifecycleEvent(row);
   }
 
   // ------- Emotion Memory -------
@@ -136,7 +137,7 @@ export class MemoryKernel {
    * 作为情绪快照写入 emotion_memory（通过 user_profile 元表模拟）。
    * 生产 Tauri sqlite 环境下由 schema.sql 创建真实 emotion_memory 表。
    */
-  public recordEmotion(trigger: string, emotionalState: EmotionalState, importanceScore = 0.5): void {
+  public async recordEmotion(trigger: string, emotionalState: EmotionalState, importanceScore = 0.5): Promise<void> {
     const snapshot: EmotionMemory = {
       id: 0,
       trigger,
@@ -150,7 +151,7 @@ export class MemoryKernel {
     // 当前适配器仅支持 user_profile + lifecycle_event 两表，
     // emotion 数据以特殊 key 前缀存入 user_profile（临时降级方案）。
     const key = `emotion:${Date.now()}`;
-    this.adapter.upsertUserProfile({
+    await this.adapter.upsertUserProfile({
       key,
       value: JSON.stringify(snapshot),
       confidence: importanceScore,

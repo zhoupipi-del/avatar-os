@@ -3,10 +3,14 @@
  *
  * 设计：MemoryStore 依赖 StorageAdapter 接口，运行时按环境注入具体实现。
  * - 开发/Web 环境：LocalStorageAdapter（浏览器真实落盘，刷新不丢）
- * - 生产 Tauri 环境：未来注入 SqliteAdapter（执行 schema.sql 的 DDL）
+ * - 生产 Tauri 环境：SQLiteStorageAdapter（经 tauri-plugin-sql 落盘 SQLite）
+ * - 非浏览器（node 测试）：MemoryOnlyAdapter（纯内存兜底，保证类型完整）
  *
- * 这样 Memory Lite 不再只是伪代码——壁垒（行为历史 + 用户画像）从 PPT 变资产。
+ * 2026-07-21 演进：接口方法统一改为 async，以支撑 Tauri SQLite 的异步 I/O。
+ * 调用方（MemoryStore / MemoryKernel）相应 await。
  */
+
+import { SQLiteStorageAdapter } from "./sqlite-adapter";
 
 export interface UserProfileRecord {
   key: string;
@@ -24,12 +28,12 @@ export interface LifecycleEventRecord {
 }
 
 export interface StorageAdapter {
-  init(): void;
-  insertLifecycleEvent(event: LifecycleEventRecord): void;
-  getAllLifecycleEvents(): LifecycleEventRecord[];
-  upsertUserProfile(rec: UserProfileRecord): void;
-  getUserProfile(key: string): UserProfileRecord | null;
-  getAllUserProfile(): UserProfileRecord[];
+  init(): Promise<void>;
+  insertLifecycleEvent(event: LifecycleEventRecord): Promise<void>;
+  getAllLifecycleEvents(): Promise<LifecycleEventRecord[]>;
+  upsertUserProfile(rec: UserProfileRecord): Promise<void>;
+  getUserProfile(key: string): Promise<UserProfileRecord | null>;
+  getAllUserProfile(): Promise<UserProfileRecord[]>;
 }
 
 const PROFILE_KEY = "avataros:user_profile";
@@ -44,7 +48,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   private events: LifecycleEventRecord[] = [];
   private nextId = 1;
 
-  public init(): void {
+  public async init(): Promise<void> {
     try {
       const p = window.localStorage.getItem(PROFILE_KEY);
       if (p) {
@@ -66,36 +70,40 @@ export class LocalStorageAdapter implements StorageAdapter {
     window.localStorage.setItem(EVENT_KEY, JSON.stringify(this.events));
   }
 
-  public insertLifecycleEvent(event: LifecycleEventRecord): void {
+  public async insertLifecycleEvent(event: LifecycleEventRecord): Promise<void> {
     const row: LifecycleEventRecord = { ...event, id: this.nextId++ };
     this.events.push(row);
     this.persist();
   }
 
-  public getAllLifecycleEvents(): LifecycleEventRecord[] {
+  public async getAllLifecycleEvents(): Promise<LifecycleEventRecord[]> {
     return [...this.events];
   }
 
-  public upsertUserProfile(rec: UserProfileRecord): void {
+  public async upsertUserProfile(rec: UserProfileRecord): Promise<void> {
     this.profiles.set(rec.key, rec);
     this.persist();
   }
 
-  public getUserProfile(key: string): UserProfileRecord | null {
+  public async getUserProfile(key: string): Promise<UserProfileRecord | null> {
     return this.profiles.get(key) ?? null;
   }
 
-  public getAllUserProfile(): UserProfileRecord[] {
+  public async getAllUserProfile(): Promise<UserProfileRecord[]> {
     return [...this.profiles.values()];
   }
 }
 
 export function createDefaultAdapter(): StorageAdapter {
-  // 浏览器 / Tauri webview 环境
+  // 生产 Tauri webview 环境：优先使用真实 SQLite 持久化
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    return new SQLiteStorageAdapter();
+  }
+  // 浏览器 / Web 环境
   if (typeof window !== "undefined" && window.localStorage) {
     return new LocalStorageAdapter();
   }
-  // 非浏览器环境（如 SSR 测试）降级为内存桩
+  // 非浏览器环境（如 node 测试）降级为内存桩
   return new MemoryOnlyAdapter();
 }
 
@@ -104,20 +112,20 @@ class MemoryOnlyAdapter implements StorageAdapter {
   private profiles = new Map<string, UserProfileRecord>();
   private events: LifecycleEventRecord[] = [];
   private nextId = 1;
-  public init(): void {}
-  public insertLifecycleEvent(event: LifecycleEventRecord): void {
+  public async init(): Promise<void> {}
+  public async insertLifecycleEvent(event: LifecycleEventRecord): Promise<void> {
     this.events.push({ ...event, id: this.nextId++ });
   }
-  public getAllLifecycleEvents(): LifecycleEventRecord[] {
+  public async getAllLifecycleEvents(): Promise<LifecycleEventRecord[]> {
     return [...this.events];
   }
-  public upsertUserProfile(rec: UserProfileRecord): void {
+  public async upsertUserProfile(rec: UserProfileRecord): Promise<void> {
     this.profiles.set(rec.key, rec);
   }
-  public getUserProfile(key: string): UserProfileRecord | null {
+  public async getUserProfile(key: string): Promise<UserProfileRecord | null> {
     return this.profiles.get(key) ?? null;
   }
-  public getAllUserProfile(): UserProfileRecord[] {
+  public async getAllUserProfile(): Promise<UserProfileRecord[]> {
     return [...this.profiles.values()];
   }
 }

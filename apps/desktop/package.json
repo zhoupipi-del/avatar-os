@@ -10,13 +10,14 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@avatar-os/memory": "workspace:*",
+    "@avatar-os/presence": "workspace:*",
     "@avatar-os/primitives": "workspace:*",
     "@avatar-os/runtime": "workspace:*",
-    "@avatar-os/presence": "workspace:*",
-    "@avatar-os/telemetry": "workspace:*",
-    "@avatar-os/memory": "workspace:*",
     "@avatar-os/sensor": "workspace:*",
+    "@avatar-os/telemetry": "workspace:*",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-sql": "^2.4.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

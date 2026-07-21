@@ -35,6 +35,8 @@ export type MemoryEvent = LifecycleEvent;
 
 export class MemoryStore {
   private adapter: StorageAdapter;
+  /** 最近一次交互事件的时间戳缓存，供 getRecentInteractionBonus 同步热路径使用 */
+  private lastEventTs: number | null = null;
 
   // SQLite 表结构 DDL — 与 schema.sql 同步（Tauri 生产环境执行）
   public readonly INIT_DDL = `
@@ -59,17 +61,20 @@ export class MemoryStore {
   }
 
   public async init(): Promise<void> {
-    this.adapter.init();
-    const profileCount = this.adapter.getAllUserProfile().length;
-    const eventCount = this.adapter.getAllLifecycleEvents().length;
+    await this.adapter.init();
+    const profileCount = (await this.adapter.getAllUserProfile()).length;
+    const events = await this.adapter.getAllLifecycleEvents();
+    this.lastEventTs = events.length
+      ? events.reduce((m, e) => Math.max(m, e.timestamp), 0)
+      : null;
     console.log(
-      `[MemoryStore] initialized. profiles=${profileCount}, events=${eventCount}. ` +
+      `[MemoryStore] initialized. profiles=${profileCount}, events=${events.length}. ` +
         `DDL (Tauri prod): user_profile + lifecycle_event`,
     );
   }
 
   /** 写入一条行为/生命周期事件到本地持久层 */
-  public remember(event: LifecycleEvent): void {
+  public async remember(event: LifecycleEvent): Promise<void> {
     const row: LifecycleEventRecord = {
       id: 0,
       eventType: event.eventType,
@@ -77,7 +82,8 @@ export class MemoryStore {
       importanceScore: event.importanceScore,
       timestamp: event.timestamp,
     };
-    this.adapter.insertLifecycleEvent(row);
+    this.lastEventTs = event.timestamp;
+    await this.adapter.insertLifecycleEvent(row);
     console.log(
       `[MemoryStore INSERT] lifecycle_event: type=${event.eventType}, ` +
         `importance=${event.importanceScore.toFixed(2)}`,
@@ -85,21 +91,21 @@ export class MemoryStore {
   }
 
   /** 读取用户画像（长期记忆） */
-  public recall(key: string): UserProfile | null {
-    const rec = this.adapter.getUserProfile(key);
+  public async recall(key: string): Promise<UserProfile | null> {
+    const rec = await this.adapter.getUserProfile(key);
     if (!rec) return null;
     return { key: rec.key, value: rec.value, confidence: rec.confidence, updatedAt: rec.updatedAt };
   }
 
   /** 直接写入用户画像键值 */
-  public rememberProfile(key: string, value: string, confidence = 1.0): void {
+  public async rememberProfile(key: string, value: string, confidence = 1.0): Promise<void> {
     const rec: UserProfileRecord = { key, value, confidence, updatedAt: Date.now() };
-    this.adapter.upsertUserProfile(rec);
+    await this.adapter.upsertUserProfile(rec);
     console.log(`[MemoryStore UPSERT] user_profile: ${key}=${value}`);
   }
 
-  public dumpEvents(): LifecycleEventRecord[] {
-    return this.adapter.getAllLifecycleEvents();
+  public async dumpEvents(): Promise<LifecycleEventRecord[]> {
+    return await this.adapter.getAllLifecycleEvents();
   }
 
   /**
@@ -109,20 +115,20 @@ export class MemoryStore {
    * 实现"最近的陪伴能缓解孤独"的壁垒行为。
    */
   public getRecentInteractionBonus(): number {
-    const events = this.adapter.getAllLifecycleEvents();
-    if (events.length === 0) return 0;
-    const lastTs = events.reduce((m, e) => Math.max(m, e.timestamp), 0);
-    const hoursAgo = (Date.now() - lastTs) / 3_600_000;
+    if (this.lastEventTs == null) return 0;
+    const hoursAgo = (Date.now() - this.lastEventTs) / 3_600_000;
     // 指数快速衰减模型 (tau = 0.3h ≈ 18min)：
     //   刚互动完 bonus≈0.9（记忆抚慰，孤独压到 ~0.19，不打扰用户）；
     //   离场 30min bonus≈0.19 → 孤独压强≈0.69 > 0.65，精准触发 PEEK 想念探头。
     // 替换原 12h 线性衰减（一次互动后 12h 内都把孤独压在阈值下，演示 100% 哑火）。
+    // 注意：本方法刻意保持同步，以适配 LifeLoop 每 tick 的同步 interactionBonusProvider
+    // 热路径；lastEventTs 在 remember 写入与 init 加载时同步更新。
     return clamp01(Math.exp(-hoursAgo / 0.3));
   }
 
   // 兼容旧接口（App.tsx 调用 logInteraction）
   public async logInteraction(event: string): Promise<void> {
-    this.remember({
+    await this.remember({
       eventType: event,
       importanceScore: 0.5,
       timestamp: Date.now(),
