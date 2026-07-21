@@ -344,7 +344,7 @@ export function Avatar() {
     <div className="avatar-root" ref={containerRef}>
       <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
-        <Body mood={mood} motion={motion} frame={frame} eyeOpenRatio={render.eyeOpenRatio} />
+        <Body mood={mood} motion={motion} frame={frame} />
       </div>
       <button
         className="touch-point"
