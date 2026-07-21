@@ -1,0 +1,122 @@
+// ============================================================
+// provider — LLM 提供者抽象 + Ollama 本地实现 (v0.1.0-alpha)
+// ============================================================
+// Cognition 引擎不直接耦合任何具体 LLM，只依赖 LLMProvider 契约。
+// 默认实现走本地 Ollama（localhost:11434），零成本、零隐私外泄，
+// 与 BOSS 本机已装好的 deepseek-r1:8b / qwen2.5:14b 直接对接。
+//
+// 关键防护：Ollama deepseek-r1 的真实输出常带 <think> 思维链 +
+// markdown ```json 代码块包裹。extractStructured 必须逐层剥离，
+// 否则脏数据会穿透到内核，制造"虚假安全感"式的偶发崩溃。
+// ============================================================
+
+import { Mood, PhysicalIntentType } from "@avatar-os/primitives";
+
+export interface LLMResult {
+  /** 是否解析出至少一个可用的 speech（决定本次响应是否"成功"） */
+  ok: boolean;
+  speech?: string;
+  mood?: Mood;
+  intent?: PhysicalIntentType;
+}
+
+export interface LLMProvider {
+  generate(userPrompt: string, systemPrompt: string): Promise<LLMResult>;
+}
+
+/**
+ * 物理意图合法值清单。
+ * PhysicalIntentType 是字符串联合类型，没有运行时枚举对象可用，
+ * 这里单列一份作为校验的单一事实来源（engine 也复用它构建 VALID_INTENTS）。
+ */
+export const PHYSICAL_INTENT_TYPES = [
+  "IDLE_BREATHE",
+  "LOOK_AT_USER",
+  "DOZE",
+  "STRETCH",
+  "GREET",
+  "PEEK",
+  "BOUNCE_HAPPY",
+] as const;
+
+function isMood(v: unknown): v is Mood {
+  // Mood 是 TS enum，运行时即 { CALM:"CALM", ... } 对象
+  return typeof v === "string" && v in Mood;
+}
+
+function isIntent(v: unknown): v is PhysicalIntentType {
+  return typeof v === "string" && (PHYSICAL_INTENT_TYPES as readonly string[]).includes(v);
+}
+
+/**
+ * 从 LLM 原始文本中提取结构化指令。
+ * 层层降级：剥离 <think> → 提取 ```json 代码块 → 直接 JSON.parse → 截取首尾大括号。
+ * 任何一层失败都不抛错，返回 {} 让上层走"无效响应"分支（静默释放控制权）。
+ */
+export function extractStructured(
+  content: string,
+): Partial<{ intent: string; speech: string; mood: string }> {
+  if (!content) return {};
+  try {
+    // 1. 剥离 <think>...</think> 思维链（可能多段）
+    let s = content.replace(/<think>[\s\S]*?<\/think>/gi, "");
+    // 2. 提取 markdown 代码块（优先 ```json，其次裸 ```）
+    const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence) s = fence[1];
+    s = s.trim();
+    // 3. 直接解析
+    try {
+      return JSON.parse(s) as Record<string, string>;
+    } catch {
+      /* 继续尝试退化解析 */
+    }
+    // 4. 截取首个 { 到最后一个 }，应对"前后有废话"的脏输出
+    const start = s.indexOf("{");
+    const end = s.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      return JSON.parse(s.slice(start, end + 1)) as Record<string, string>;
+    }
+  } catch {
+    /* 放弃，返回 {} */
+  }
+  return {};
+}
+
+export class OllamaProvider implements LLMProvider {
+  constructor(
+    private readonly model = "deepseek-r1:8b",
+    private readonly baseUrl = "http://localhost:11434",
+  ) {}
+
+  async generate(userPrompt: string, systemPrompt: string): Promise<LLMResult> {
+    const prompt = systemPrompt ? `${systemPrompt}\n\n${userPrompt}` : userPrompt;
+
+    let data: unknown;
+    try {
+      const res = await fetch(`${this.baseUrl}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: this.model, prompt, stream: false }),
+      });
+      if (!res.ok) {
+        console.debug(`[OllamaProvider 🛡️] HTTP ${res.status}，已静默释放控制权`);
+        return { ok: false };
+      }
+      data = await res.json();
+    } catch (err) {
+      console.debug("[OllamaProvider 🛡️] 请求失败（Ollama 未启动？），已静默释放控制权:", err);
+      return { ok: false };
+    }
+
+    const content = (data as { message?: { content?: string } })?.message?.content ?? "";
+    const parsed = extractStructured(content);
+
+    const mood = isMood(parsed.mood) ? parsed.mood : undefined;
+    const intent = isIntent(parsed.intent) ? (parsed.intent as PhysicalIntentType) : undefined;
+    const speech = typeof parsed.speech === "string" ? parsed.speech : undefined;
+
+    // 至少要有可说的内容才算成功响应；否则视为无效，让引擎走 fallback
+    if (!speech) return { ok: false };
+    return { ok: true, speech, mood, intent };
+  }
+}

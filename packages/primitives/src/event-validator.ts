@@ -50,5 +50,22 @@ export function validateKernelEvent(event: unknown): event is KernelEvent<unknow
     }
   }
 
+  // 类型特定的载荷语义校验（R7 演进：防止畸形载荷穿透内核门禁）。
+  // 结构校验只保证"事件壳合法"，这里进一步锁死新增载荷的字段形状，
+  // 避免 LLM / 多模态等不可信来源注入缺字段或非法枚举值。
+  if (e.type === "MEMORY_APPEND") {
+    if (typeof p?.content !== "string") return false;
+    if (!["user", "avatar", "system"].includes(p?.source as string)) return false;
+  }
+  if (e.type === "AVATAR_THOUGHT") {
+    const kind = p?.kind as string | undefined;
+    if (!["thought", "state", "speech", "thinking", "clear"].includes(kind ?? "")) return false;
+    // clear 仅用于清空气泡，允许无内容；其余 kind 必须有 text
+    if (kind !== "clear" && typeof p?.text !== "string") return false;
+  }
+  if (e.type === "SPEECH_INPUT") {
+    if (typeof p?.text !== "string") return false;
+  }
+
   return true;
 }

@@ -5,7 +5,7 @@ interface ActiveThought {
   id: number;
   emoji: string;
   text: string;
-  kind: "thought" | "state";
+  kind: "thought" | "state" | "speech" | "thinking";
 }
 
 /**
@@ -21,8 +21,16 @@ export const ThoughtBubble: React.FC = () => {
     const timers = new Map<number, number>();
 
     const unbind = kernelEventBus.on("AVATAR_THOUGHT", (p) => {
+      // clear：立即清空气泡，不渲染内容
+      if (p.kind === "clear") {
+        setThought(null);
+        return;
+      }
       const id = ++counter;
-      setThought({ id, emoji: p.emoji, text: p.text, kind: p.kind });
+      setThought({ id, emoji: p.emoji ?? "💭", text: p.text ?? "", kind: p.kind });
+
+      // thinking：思考占位，持续显示直到被 clear 或后续 speech/thought 覆盖（不自动淡出）
+      if (p.kind === "thinking") return;
 
       const duration = p.durationMs ?? 2600;
       const handle = window.setTimeout(() => {

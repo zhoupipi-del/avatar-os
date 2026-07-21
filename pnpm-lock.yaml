@@ -85,6 +85,15 @@ importers:
         specifier: ^5.1.0
         version: 5.4.21
 
+  packages/cognition:
+    dependencies:
+      '@avatar-os/primitives':
+        specifier: workspace:*
+        version: link:../primitives
+      '@avatar-os/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+
   packages/memory:
     dependencies:
       '@avatar-os/primitives':

@@ -1,0 +1,14 @@
+{
+  "name": "@avatar-os/cognition",
+  "version": "0.1.0-alpha",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@avatar-os/runtime": "workspace:*",
+    "@avatar-os/primitives": "workspace:*"
+  }
+}

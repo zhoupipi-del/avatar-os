@@ -10,7 +10,9 @@ export type KernelEventType =
   | "STATE_MOTION_CHANGED"
   | "STATE_RENDER_PARAMS_CHANGED"
   | "SYSTEM_STATUS_CHANGED"
-  | "AVATAR_THOUGHT";
+  | "AVATAR_THOUGHT"
+  | "MEMORY_APPEND"
+  | "SPEECH_INPUT";
 
 export interface KernelEventPayloads {
   SENSOR_MOUSE_MOVE: { x: number; y: number };
@@ -26,16 +28,30 @@ export interface KernelEventPayloads {
     gazeBias: { x: number; y: number };
   };
   SYSTEM_STATUS_CHANGED: { status: "idle" | "success" | "error" };
-  /** 状态/想法气泡：由情绪/意图/系统状态/空闲行为树统一发射，驱动 ThoughtBubble 渲染 */
+  /**
+   * 状态/想法气泡：由情绪/意图/系统状态/空闲行为树/Cognition 引擎统一发射，驱动 ThoughtBubble 渲染。
+   * kind 扩展：thought/state(原有) + speech(LLM 说出) / thinking(LLM 思考占位) / clear(清空气泡)。
+   * emoji/text 在 clear 时可省略（clear 仅用于清空，不渲染内容）。
+   */
   AVATAR_THOUGHT: {
-    emoji: string;
-    text: string;
-    /** thought=自主想法/情绪反馈; state=状态播报(如系统成功/失败) */
-    kind: "thought" | "state";
-    /** 自动淡出时长(ms)，缺省由组件决定 */
+    emoji?: string;
+    text?: string;
+    kind: "thought" | "state" | "speech" | "thinking" | "clear";
+    /** 自动淡出时长(ms)，缺省由组件决定；kind="thinking" 不自动淡出，等待 clear/speech 覆盖 */
     durationMs?: number;
-    /** 来源标记: MOOD / INTENT / SYSTEM / IDLE */
+    /** 来源标记: MOOD / INTENT / SYSTEM / IDLE / COGNITION */
     source?: string;
+  };
+  /** 记忆追加：Cognition 引擎将用户发言 / AI 回复落盘到 MemoryKernel 的总线事件 */
+  MEMORY_APPEND: {
+    source: "user" | "avatar" | "system";
+    content: string;
+    timestamp: number;
+  };
+  /** 用户输入：Tauri Chat Input 或语音转写注入的用户的原始发言，供 Cognition 引擎消费 */
+  SPEECH_INPUT: {
+    text: string;
+    timestamp: number;
   };
 }
 
