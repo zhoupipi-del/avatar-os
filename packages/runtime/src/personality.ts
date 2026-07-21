@@ -1,5 +1,5 @@
 // ============================================================
-// PersonalityVector — 性格向量 (v0.2.0-alpha Life Closed-Loop)
+// PersonalityVector — 性格向量 (v0.1.0-alpha Life Closed-Loop)
 // ============================================================
 // 性格是「需求→压力」生理曲线的调制器：
 //   - openness   开放性：好奇冲动的来源强度（curiosityPressure 系数）

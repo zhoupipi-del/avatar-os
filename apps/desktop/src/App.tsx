@@ -16,21 +16,22 @@ const DRIVE_TICK_MS = 1000;
  */
 export default function App() {
   useEffect(() => {
-    // 自举顺序：遥测订阅 → 记忆库初始化 → 行为规则注册 → 存在感引擎启动
+    // 自举顺序：遥测订阅 → 记忆库初始化 → 行为规则注册
     telemetry.init();
     void memoryStore.init();
     registerDefaultRules(behaviorVM);
-    presenceEngine.start();
 
     // 在场感知层：绑定到 body（avatar 居中，body 中心≈avatar 中心）
     const presenceLayer = new PresenceSensorLayer();
     presenceLayer.attach(document.body);
     presenceLayer.start(() => {});
 
-    // 生命闭环：每 tick 采样真实在场 → DriveEngine → BehaviorVM → Morphology
+    // 生命闭环：单一 1000ms 心跳。R2 修复——PresenceEngine 不再持有独立
+    // 定时器，其微动作节律由 LifeLoop 每 tick 经 presenceEngine.step() 驱动。
     const lifeLoop = new LifeLoop({
       presenceProvider: () => presenceLayer.getPresence(),
       interactionBonusProvider: () => memoryStore.getRecentInteractionBonus(),
+      presenceEngine,
       interactionLogger: (intent) => {
         // O6：孤独偷看行为落盘为交互记忆，反哺记忆甜度
         if (intent.type === "PEEK") {
@@ -55,7 +56,6 @@ export default function App() {
       unbindMood();
       lifeLoop.stop();
       presenceLayer.stop();
-      presenceEngine.stop();
     };
   }, []);
 

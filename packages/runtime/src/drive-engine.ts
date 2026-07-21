@@ -1,5 +1,5 @@
 // ============================================================
-// DriveEngine — 需求→压力 生理时钟 (v0.2.0-alpha Life Closed-Loop)
+// DriveEngine — 需求→压力 生理时钟 (v0.1.0-alpha Life Closed-Loop)
 // ============================================================
 // P0 原地升舱（不另起 drive-engine-v2.ts，避免双实现陷阱）：
 //   - 输入由伪造 DesktopContext 改为真实 UserPresence + PersonalityVector

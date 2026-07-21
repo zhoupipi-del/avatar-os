@@ -1,5 +1,5 @@
 // ============================================================
-// @avatar-os/morphology — 形态映射层 (v0.2.0-alpha)
+// @avatar-os/morphology — 形态映射层 (v0.1.0-alpha)
 // ============================================================
 // Morphology 是「Arbiter 仲裁出的 PhysicalIntent + LifeState + 情绪」
 // 到「渲染参数 RenderParams」的唯一翻译层。它不持有生命状态，只把

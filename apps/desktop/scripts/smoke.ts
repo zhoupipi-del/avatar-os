@@ -1,14 +1,21 @@
-// 冒烟验证：直接跑真实 DriveEngine + BehaviorVM 源码，验证 v0.2.0-alpha 闭环数学。
+// 冒烟验证：直接跑真实 DriveEngine + BehaviorVM 源码，验证 v0.1.0-alpha 闭环数学。
 import { DriveEngine } from "@avatar-os/runtime/src/drive-engine";
 import { DEFAULT_PERSONALITY } from "@avatar-os/runtime/src/personality";
 import { BehaviorVM } from "@avatar-os/runtime/src/behavior-vm";
 import { registerDefaultRules } from "@avatar-os/runtime/src/behavior-rules";
 import { kernelEventBus } from "@avatar-os/runtime/src/event-bus";
-import { PhysicalIntent } from "@avatar-os/primitives";
+import { PhysicalIntent, LifeState } from "@avatar-os/primitives";
+
+// 本脚本是 Node 冒烟验证，局部声明 process 以避免引入全局 @types/node
+declare const process: { exit(code: number): never };
 
 type Presence = { level: number };
 
-function runScenario(opts: { presenceLevel: number; bonus: number; minutes: number }) {
+function runScenario(opts: {
+  presenceLevel: number;
+  bonus: number;
+  minutes: number;
+}): { finalState: LifeState; lastIntent: PhysicalIntent | null; peekFired: boolean } {
   const de = new DriveEngine();
   const vm = new BehaviorVM();
   registerDefaultRules(vm);

@@ -148,7 +148,7 @@ export class IdleSensorAdapter implements SensorAdapter {
   }
 }
 
-// ------- 在场感知层 (v0.2.0-alpha Life Closed-Loop) -------
+// ------- 在场感知层 (v0.1.0-alpha Life Closed-Loop) -------
 export * from "./presence-sensor";
 
 // ------- 默认传感器注册表 -------

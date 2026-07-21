@@ -23,7 +23,7 @@ import type {
   LifeState,
   DrivePressures,
 } from "@avatar-os/primitives";
-import { makeIntent } from "@avatar-os/primitives";
+import { makeIntent, validateKernelEvent } from "@avatar-os/primitives";
 import { MemoryKernel } from "@avatar-os/memory";
 import { kernelEventBus } from "./event-bus";
 import { DriveEngine } from "./drive-engine";
@@ -95,6 +95,12 @@ export class AvatarKernel {
    * 2. 再桥接到冻结期 kernelEventBus（AvatarFSM / Avatar.tsx 兼容）
    */
   public dispatchKernelEvent(event: KernelEvent): void {
+    // R7 事件门禁：非法/越界事件直接丢弃，不入内核
+    if (!validateKernelEvent(event)) {
+      console.warn("[AvatarKernel ⛔] Dropped invalid kernel event:", event);
+      return;
+    }
+
     // 内部监听器
     const listeners = this.eventListeners.get(event.type);
     if (listeners) {

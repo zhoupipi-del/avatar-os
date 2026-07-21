@@ -1,57 +1,48 @@
-import { kernelEventBus } from "@avatar-os/runtime";
-import { makeIntent } from "@avatar-os/primitives";
+// ============================================================
+// @avatar-os/presence — PresenceEngine (v0.1.0-alpha)
+// ============================================================
+// 重构（R2 竞态修复）：彻底移除内部 setInterval/setTimeout 定时器，
+// 降级为「纯函数节律步进器」，完全由 LifeLoop 的单一 1000ms 心跳统一驱动。
+//
+// 设计要点：
+//   - 不再持有任何并发定时器；step() 由 LifeLoop 每 tick 调用一次。
+//   - 微动作（眨眼/伸懒腰/环顾）是纯 CSS 表现层动作，不进入 Mood 路由，
+//     因此由 LifeLoop 经 kernelEventBus 直接下发，与 BehaviorVM 的
+//     "有意义行为"（GREET/PEEK/DOZE）仲裁互不干扰、但共用同一心跳。
+//   - 旧版 presenceEngine.start() 的 3 条递归 setTimeout 已删除，
+//     从根上消灭"双心跳竞争"。
+// ============================================================
 
-/**
- * Phase 0.5 Presence Engine — 泊松式随机节律
- * 三条独立自主节律通道，各自随机区间递归调度：
- * - 眨眼 BLINK: 5-12s（纯 CSS 微动作，内核仅保持平静呼吸意图，不扰动 Mood）
- * - 伸懒腰 STRETCH: 30-180s
- * - 环顾巡视 LOOK_AT_USER: 60-300s
- * 只通过 kernelEventBus 发 PHYSICAL_INTENT_DISPATCH，绝不持有生命状态。
- */
+import { makeIntent, PhysicalIntentType } from "@avatar-os/primitives";
+
 export class PresenceEngine {
-  private isRunning = false;
+  private lastBlinkMs = 0;
+  private lastGazeMs = 0;
+  private lastStretchMs = 0;
 
-  public start() {
-    this.isRunning = true;
-    this.scheduleBlink();
-    this.scheduleStretch();
-    this.scheduleLookAround();
-  }
+  /**
+   * 由 LifeLoop 单心跳统一调用。
+   * @returns 本 tick 触发的微动作意图类型；无则返回 undefined
+   */
+  public step(nowMs: number, idleMs: number): PhysicalIntentType | undefined {
+    const sinceBlink = nowMs - this.lastBlinkMs;
+    const sinceGaze = nowMs - this.lastGazeMs;
+    const sinceStretch = nowMs - this.lastStretchMs;
 
-  public stop() {
-    this.isRunning = false;
-  }
-
-  private getRandomDelay(minSec: number, maxSec: number): number {
-    return (Math.random() * (maxSec - minSec) + minSec) * 1000;
-  }
-
-  // 自主眨眼：5-12 秒泊松区间（眨眼为纯 CSS 微动作，内核发平静呼吸意图即可）
-  private scheduleBlink() {
-    if (!this.isRunning) return;
-    setTimeout(() => {
-      kernelEventBus.emit("PHYSICAL_INTENT_DISPATCH", makeIntent({ type: "IDLE_BREATHE", intensity: 0.3, source: "DRIVE" }));
-      this.scheduleBlink();
-    }, this.getRandomDelay(5, 12));
-  }
-
-  // 伸懒腰小动作：30-180 秒随机区间
-  private scheduleStretch() {
-    if (!this.isRunning) return;
-    setTimeout(() => {
-      kernelEventBus.emit("PHYSICAL_INTENT_DISPATCH", makeIntent({ type: "STRETCH", intensity: 0.8, source: "DRIVE" }));
-      this.scheduleStretch();
-    }, this.getRandomDelay(30, 180));
-  }
-
-  // 环顾巡视：60-300 秒随机区间
-  private scheduleLookAround() {
-    if (!this.isRunning) return;
-    setTimeout(() => {
-      kernelEventBus.emit("PHYSICAL_INTENT_DISPATCH", makeIntent({ type: "LOOK_AT_USER", intensity: 0.6, source: "DRIVE" }));
-      this.scheduleLookAround();
-    }, this.getRandomDelay(60, 300));
+    // 泊松节律近似（概率触发，与旧版区间一致）
+    if (sinceBlink > 3000 && Math.random() < 0.3) {
+      this.lastBlinkMs = nowMs;
+      return "IDLE_BREATHE"; // 眨眼 = 平静呼吸微动作
+    }
+    if (idleMs < 5000 && sinceGaze > 8000 && Math.random() < 0.2) {
+      this.lastGazeMs = nowMs;
+      return "LOOK_AT_USER"; // 活跃时偶尔环顾
+    }
+    if (idleMs > 60000 && sinceStretch > 120000 && Math.random() < 0.1) {
+      this.lastStretchMs = nowMs;
+      return "STRETCH"; // 长时间空闲后伸懒腰
+    }
+    return undefined;
   }
 }
 

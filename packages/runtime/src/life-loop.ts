@@ -1,5 +1,5 @@
 // ============================================================
-// LifeLoop — 生命闭环编排器 (v0.2.0-alpha)
+// LifeLoop — 生命闭环编排器 (v0.1.0-alpha)
 // ============================================================
 // 蓝图里的"编排器"：把 7 层按 tick 串成真正的闭环，
 // 而不是各自独立运行。每个 tick 的顺序即生命演化的因果链：
@@ -11,13 +11,22 @@
 // 事件发射。这是从"技术 Demo"跨向"会自己活的数字生命"的关键齿轮。
 // ============================================================
 
-import { PhysicalIntent } from "@avatar-os/primitives";
+import { PhysicalIntent, PhysicalIntentType, makeIntent } from "@avatar-os/primitives";
 import { UserPresence, DEFAULT_PRESENCE } from "@avatar-os/sensor";
 import { MorphologyEngine } from "@avatar-os/morphology";
 import { kernelEventBus } from "./event-bus";
 import { driveEngine } from "./drive-engine";
 import { behaviorVM } from "./behavior-vm";
 import { PersonalityVector, DEFAULT_PERSONALITY } from "./personality";
+
+/**
+ * 在场微动作步进器契约（R2：由单一心跳驱动）。
+ * 不依赖 @avatar-os/presence 以避免与 presence→runtime 形成循环依赖；
+ * 任何拥有 step(nowMs, idleMs) 的对象（如 PresenceEngine）都可注入。
+ */
+export interface PresenceStepper {
+  step(nowMs: number, idleMs: number): PhysicalIntentType | undefined;
+}
 
 export interface LifeLoopDeps {
   /** 每 tick 采样真实在场信号（O1 修复入口） */
@@ -28,6 +37,8 @@ export interface LifeLoopDeps {
   interactionBonusProvider?: () => number;
   /** 意图落盘钩子（如 PEEK 写入交互日志） */
   interactionLogger?: (intent: PhysicalIntent) => void;
+  /** 在场微动作节律步进器（R2：由单一心跳驱动，无独立定时器） */
+  presenceEngine?: PresenceStepper;
   /** tick 间隔(ms)，缺省 1000 */
   tickMs?: number;
 }
@@ -68,6 +79,7 @@ export class LifeLoop {
   }
 
   private tick(): void {
+    const nowMs = Date.now();
     const presence: UserPresence =
       this.deps.presenceProvider != null ? this.deps.presenceProvider() : { ...DEFAULT_PRESENCE };
     const bonus = this.deps.interactionBonusProvider?.() ?? 0.0;
@@ -76,11 +88,20 @@ export class LifeLoop {
     const { state, emotionalState } = driveEngine.tick(this.tickMs, presence, this.personality, bonus);
 
     // 2. 兼容遗留总线：压力 tick 事件
-    kernelEventBus.emit("DRIVE_PRESSURE_TICK", { timestamp: Date.now() });
+    kernelEventBus.emit("DRIVE_PRESSURE_TICK", { timestamp: nowMs });
 
     // 3. Arbiter：评估规则 → 抢占仲裁 → 派发 PhysicalIntent
     behaviorVM.evaluate(state);
     behaviorVM.tick(this.tickMs);
+
+    // 3.5 在场微动作节律（R2：纯步进，由本单一心跳驱动，无独立定时器）
+    const rhythm = this.deps.presenceEngine?.step(nowMs, presence.idleTimeMs ?? 0);
+    if (rhythm) {
+      kernelEventBus.emit(
+        "PHYSICAL_INTENT_DISPATCH",
+        makeIntent({ type: rhythm, intensity: 0.3, source: "DRIVE" }),
+      );
+    }
 
     // 4. Morphology：意图+状态 → 渲染参数
     const params = this.morphology.render(state, emotionalState);
