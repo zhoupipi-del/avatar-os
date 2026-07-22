@@ -93,6 +93,16 @@ export function DebugConsole() {
   const [thinking, setThinking] = useState(false);
   const [stages, setStages] = useState<StageState>({});
   const [log, setLog] = useState<LogEntry[]>([]);
+  // LIVE STATE 只读监护仪：从现有事件订阅派生的"当前快照"，不引入任何新逻辑/新依赖。
+  // 注意：引擎不产出 confidence，故以 normalizer 的 matched 布尔作为"大脑判断可信度"的诚实替代。
+  const [live, setLive] = useState<{
+    intent?: string;
+    action?: string;
+    clip?: string;
+    speech?: string;
+    mood?: string;
+    matched?: boolean;
+  }>({});
   const logId = useRef(0);
 
   useEffect(() => {
@@ -119,12 +129,14 @@ export function DebugConsole() {
         setThinking(false);
         const label = p.kind === "speech" ? "💬" : p.kind === "state" ? "📣" : "💭";
         setStages((s) => ({ ...s, cognition: `${label} ${p.text ?? ""}` }));
+        if (p.kind === "speech") setLive((s) => ({ ...s, speech: p.text ?? "" }));
         pushLog("COGNITION", `${p.kind}: ${p.text ?? ""}`);
       }
     });
 
     const u3 = kernelEventBus.on("PHYSICAL_INTENT_DISPATCH", (p) => {
       setStages((s) => ({ ...s, intent: p.type }));
+      setLive((s) => ({ ...s, action: p.type }));
       pushLog("INTENT", p.type);
     });
 
@@ -132,17 +144,21 @@ export function DebugConsole() {
     // "LLM 到底吐了啥" 永远可观测；UNKNOWN 的原始证据也借此留存（未来 Intent Router 训练）。
     const uNorm = kernelEventBus.on("INTENT_NORMALIZED", (p) => {
       setStages((s) => ({ ...s, norm: `${p.raw || "∅"} ⇒ ${p.normalized}` }));
+      setLive((s) => ({ ...s, intent: p.normalized, matched: p.matched }));
       const tag = !p.matched ? "UNKNOWN⚠" : p.normalized === "NONE" ? "NONE" : "normalized";
       pushLog("COGNITION", `${tag}: raw="${p.raw}" → ${p.normalized}`);
     });
 
     const u4 = kernelEventBus.on("AVATAR_PRIMITIVE", (p) => {
       setStages((s) => ({ ...s, primitive: `${p.type} · ${p.detail}` }));
+      // PLAY_ANIMATION 的 detail 形如 "clip=NlaTrack.001"，实时读出当前播放片段名
+      if (p.detail.startsWith("clip=")) setLive((s) => ({ ...s, clip: p.detail.slice(5) }));
       pushLog("POSE/ANIM", `${p.type} ${p.detail}`);
     });
 
     const u5 = kernelEventBus.on("STATE_MOOD_CHANGED", (p) => {
       setStages((s) => ({ ...s, mood: p.mood }));
+      setLive((s) => ({ ...s, mood: p.mood }));
       pushLog("MOOD", p.mood);
     });
 
@@ -211,6 +227,22 @@ export function DebugConsole() {
         >
           ▢
         </span>
+      </div>
+
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(120,160,255,0.12)" }}>
+        <div style={{ color: "#8aa0c8", fontSize: 11, letterSpacing: 0.5, marginBottom: 4 }}>
+          LIVE STATE · 心电监护仪（只读）
+        </div>
+        <Stage label="Intent" value={live.intent} accent="#b69bff" />
+        <Stage label="Action" value={live.action} accent="#b69bff" />
+        <Stage label="Clip" value={live.clip} accent="#7dffa8" />
+        <Stage label="Speech" value={live.speech} accent="#ffd479" />
+        <Stage label="Mood" value={live.mood} accent="#ff9bd0" />
+        <Stage
+          label="Match"
+          value={live.matched === undefined ? undefined : live.matched ? "✅" : "⚠ UNKNOWN"}
+          accent="#ff9bd0"
+        />
       </div>
 
       <div style={{ padding: "8px 10px" }}>

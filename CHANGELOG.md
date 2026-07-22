@@ -32,14 +32,19 @@
 
 ---
 
-## v0.3.1.1 — Runtime State Snapshot（规划中，未发布）
+## v0.3.1.1 — Runtime State Snapshot · 2026-07-22
 
-**目标：给生命体装一个"心电监护仪"——只读、不改变逻辑。**
+**给生命体装一个"心电监护仪"——只读、不改变逻辑。**
 
 - 在 DebugConsole 展开态顶部新增 `LIVE STATE` 只读面板，从现有事件订阅派生当前快照：
   `Intent / Action / Clip / Speech / Mood / Match(✅|⚠ UNKNOWN)`。
-- **不引入 `confidence`**：当前 Cognition 引擎不产出置信度，以 normalizer 的 `matched` 布尔作为诚实替代。
-- 复用既有 `snapshot-manager.ts`（`driveEngine.getState()` / `avatarFSM.getMood()`）作为结构化状态源的可选扩展方向，但 v0.3.1.1 不重造模块。
+  - `Intent/Action` ← `INTENT_NORMALIZED` / `PHYSICAL_INTENT_DISPATCH`
+  - `Clip` ← `AVATAR_PRIMITIVE` 的 `detail="clip=NlaTrack.001"`（实时读出当前播放片段）
+  - `Speech` ← `AVATAR_THOUGHT(speech)`
+  - `Mood` ← `STATE_MOOD_CHANGED`
+- **不引入 `confidence`**：当前 Cognition 引擎不产出置信度，以 normalizer 的 `matched` 布尔作为"大脑判断可信度"的诚实替代（✅匹配 / ⚠ UNKNOWN）。
+- 复用既有 `snapshot-manager.ts`（`driveEngine.getState()` / `avatarFSM.getMood()`）作为结构化状态源的可选扩展方向，但 v0.3.1.1 不重造模块、不新增运行时依赖。
+- 零逻辑改动：仅 DebugConsole 增加只读订阅与展示，EventBus / Runtime / Avatar 一律不动。
 
 ---
 
