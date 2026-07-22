@@ -88,7 +88,7 @@ function Stage({ label, value, accent }: { label: string; value?: string; accent
 }
 
 export function DebugConsole() {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [stages, setStages] = useState<StageState>({});
