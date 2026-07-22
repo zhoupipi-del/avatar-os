@@ -19,6 +19,7 @@ import type { PhysicalIntentType } from "@avatar-os/primitives";
 interface StageState {
   input?: string;
   cognition?: string;
+  norm?: string;
   intent?: string;
   primitive?: string;
   mood?: string;
@@ -127,6 +128,14 @@ export function DebugConsole() {
       pushLog("INTENT", p.type);
     });
 
+    // 意图归一化追踪：把 LLM 原始意图(raw)与归一化结果打印出来，
+    // "LLM 到底吐了啥" 永远可观测；UNKNOWN 的原始证据也借此留存（未来 Intent Router 训练）。
+    const uNorm = kernelEventBus.on("INTENT_NORMALIZED", (p) => {
+      setStages((s) => ({ ...s, norm: `${p.raw || "∅"} ⇒ ${p.normalized}` }));
+      const tag = !p.matched ? "UNKNOWN⚠" : p.normalized === "NONE" ? "NONE" : "normalized";
+      pushLog("COGNITION", `${tag}: raw="${p.raw}" → ${p.normalized}`);
+    });
+
     const u4 = kernelEventBus.on("AVATAR_PRIMITIVE", (p) => {
       setStages((s) => ({ ...s, primitive: `${p.type} · ${p.detail}` }));
       pushLog("POSE/ANIM", `${p.type} ${p.detail}`);
@@ -146,6 +155,7 @@ export function DebugConsole() {
       u1();
       u2();
       u3();
+      uNorm();
       u4();
       u5();
       u6();
@@ -206,6 +216,7 @@ export function DebugConsole() {
       <div style={{ padding: "8px 10px" }}>
         <Stage label="INPUT" value={stages.input} accent="#9fe6ff" />
         <Stage label="COGNITION" value={stages.cognition} accent="#ffd479" />
+        <Stage label="INTENT(raw)" value={stages.norm} accent="#b69bff" />
         <Stage label="INTENT" value={stages.intent} accent="#b69bff" />
         <Stage label="POSE/ANIM" value={stages.primitive} accent="#7dffa8" />
         <Stage label="MOOD" value={stages.mood} accent="#ff9bd0" />
@@ -271,6 +282,9 @@ export function DebugConsole() {
         ))}
       </div>
 
+      <div style={{ padding: "0 10px 4px", color: "#6b7da0", fontSize: 10.5, lineHeight: 1.4 }}>
+        断点定位：① Body测试(不经大脑) ② 输入框自然语言(看 raw⇒normalized) ③ 若 POSE/ANIM 空白=身体端断；若 INTENT(raw) 空白=大脑/归一化断
+      </div>
       <div
         style={{
           borderTop: "1px solid rgba(120,160,255,0.2)",

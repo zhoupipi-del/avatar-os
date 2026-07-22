@@ -15,6 +15,7 @@
 import { kernelEventBus, AgentSandbox } from "@avatar-os/runtime";
 import { Mood, PhysicalIntentType } from "@avatar-os/primitives";
 import { LLMProvider, PHYSICAL_INTENT_TYPES } from "./provider";
+import { normalizeIntent, isDispatchable } from "./intent-normalizer";
 
 export interface LifeContext {
   /** 用户的原始发言；存在即视为"客观事实"，最先落盘 */
@@ -106,9 +107,19 @@ export class CognitionEngine {
         kernelEventBus.emit("STATE_MOOD_CHANGED", { mood: result.mood });
       }
 
-      if (result.intent && VALID_INTENTS.has(result.intent)) {
-        // 经 AgentSandbox 走合法 IntentSource="AI" 派发，交现有 Arbiter 仲裁
-        this.sandbox.dispatchExternalIntent(result.intent, 0.8);
+      // —— 意图归一化（观察优先，不拦截）——
+      // provider 透传的是 LLM 原始意图字符串；这里归一化后：
+      //   · 合法物理意图 → 经 AgentSandbox 派发（IntentSource="AI"），交 Arbiter 仲裁
+      //   · NONE（模型明确无动作）→ 不派发，但原始证据已随 INTENT_NORMALIZED 进日志
+      //   · UNKNOWN（系统不认识）→ 同上，且 raw 保留供未来 Intent Router 训练
+      const norm = normalizeIntent(result.intent);
+      kernelEventBus.emit("INTENT_NORMALIZED", {
+        raw: norm.raw,
+        normalized: norm.normalized,
+        matched: norm.matched,
+      });
+      if (isDispatchable(norm.normalized)) {
+        this.sandbox.dispatchExternalIntent(norm.normalized, 0.8);
       }
     } finally {
       this.isThinking = false;
@@ -124,9 +135,10 @@ export class CognitionEngine {
       "你是桌面上一个名叫「二狗子」的萌系桌面宠物，性格接地气、话不多但到位。",
       "请用简体中文回复，不超过 80 字。",
       "只输出一个 JSON 对象，不要任何解释或额外文字，格式如下：",
-      '{"intent":"GREET|PEEK|STRETCH|BOUNCE_HAPPY|LOOK_AT_USER|DOZE|IDLE_BREATHE",',
-      '"speech":"你说的话","mood":"CALM|CURIOUS|HAPPY|EXCITED|TIRED|FOCUSED|LONELY|PLAYFUL|SAD|SLEEPING"}',
-      "intent 可选：没有明确肢体动作意图时省略该字段（不要填 none）。",
+      '{"intent":"GREET","speech":"你说的话","mood":"CALM"}',
+      "intent 字段只能取【单个】值，从以下 7 个里选一个（不要并列、不要抄示例格式）：",
+      "GREET / PEEK / STRETCH / BOUNCE_HAPPY / LOOK_AT_USER / DOZE / IDLE_BREATHE。",
+      "没有明确肢体动作意图时【省略】该字段（不要填 none 或空字符串）。",
       `当前情绪：${ctx.currentMood}，能量：${ctx.energy.toFixed(2)}，孤独感：${ctx.loneliness.toFixed(2)}`,
       memoryLine ? `近期记忆：\n${memoryLine}` : "近期记忆：无",
     ].join("\n");

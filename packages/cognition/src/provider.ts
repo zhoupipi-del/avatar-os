@@ -10,14 +10,19 @@
 // 否则脏数据会穿透到内核，制造"虚假安全感"式的偶发崩溃。
 // ============================================================
 
-import { Mood, PhysicalIntentType } from "@avatar-os/primitives";
+import { Mood } from "@avatar-os/primitives";
 
 export interface LLMResult {
   /** 是否解析出至少一个可用的 speech（决定本次响应是否"成功"） */
   ok: boolean;
   speech?: string;
   mood?: Mood;
-  intent?: PhysicalIntentType;
+  /**
+   * LLM 原始意图字符串（未校验、未归一化）。
+   * ⚠️ 只透传，绝不预校验/丢弃——归一化推迟到 CognitionEngine 的 IntentNormalizer。
+   * 这是"观察优先"的前提：未知意图→UNKNOWN（保留 raw），而不是被 provider 静默变成 undefined。
+   */
+  intent?: string;
 }
 
 export interface LLMProvider {
@@ -42,10 +47,6 @@ export const PHYSICAL_INTENT_TYPES = [
 function isMood(v: unknown): v is Mood {
   // Mood 是 TS enum，运行时即 { CALM:"CALM", ... } 对象
   return typeof v === "string" && v in Mood;
-}
-
-function isIntent(v: unknown): v is PhysicalIntentType {
-  return typeof v === "string" && (PHYSICAL_INTENT_TYPES as readonly string[]).includes(v);
 }
 
 /**
@@ -116,7 +117,9 @@ export class OllamaProvider implements LLMProvider {
     const parsed = extractStructured(content);
 
     const mood = isMood(parsed.mood) ? parsed.mood : undefined;
-    const intent = isIntent(parsed.intent) ? (parsed.intent as PhysicalIntentType) : undefined;
+    // ⚠️ 透传原始意图字符串，不做预校验/丢弃。归一化推迟到 CognitionEngine 的
+    // IntentNormalizer（观察优先：保留 raw 证据，未知→UNKNOWN 而非静默 undefined）。
+    const intent = parsed.intent != null ? String(parsed.intent) : undefined;
     const speech = typeof parsed.speech === "string" ? parsed.speech : undefined;
 
     // 至少要有可说的内容才算成功响应；否则视为无效，让引擎走 fallback

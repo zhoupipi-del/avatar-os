@@ -2,9 +2,13 @@
 // 仅本地开发用（依赖 localhost:11434 + 已拉模型），CI 不跑。
 import { describe, it } from "vitest";
 import { OllamaProvider } from "../src/provider";
-import { CognitionEngine, VALID_INTENTS, VALID_MOODS } from "../src/cognition-engine";
+import { CognitionEngine, VALID_MOODS } from "../src/cognition-engine";
 import { kernelEventBus, AgentSandbox } from "@avatar-os/runtime";
 import { Mood } from "@avatar-os/primitives";
+
+// 探针在 node 环境跑；runtime 的 AvatarFSM 假设浏览器全局 window。
+// 这里 shim 一下让 node 也能跑完整条链路（仅探针用，不碰 runtime 代码）。
+(globalThis as any).window = globalThis;
 
 const MODEL = process.env.PROBE_MODEL || "qwen2.5:0.5b";
 
@@ -31,7 +35,7 @@ describe("live probe (real Ollama)", () => {
     console.log("[PROBE] RAW content =", JSON.stringify((probeJson.message?.content ?? "").slice(0, 400)));
     console.log("[PROBE] provider.ok =", raw.ok);
     console.log("[PROBE] provider.speech =", JSON.stringify(raw.speech));
-    console.log("[PROBE] provider.intent =", raw.intent, "valid?", raw.intent ? VALID_INTENTS.has(raw.intent) : "n/a");
+    console.log("[PROBE] provider.intent(raw) =", JSON.stringify(raw.intent), "(未归一化, 透传原文)");
     console.log("[PROBE] provider.mood =", raw.mood, "valid?", raw.mood ? VALID_MOODS.has(raw.mood) : "n/a");
 
     // 2) 跑完整引擎，订阅事件看链路
@@ -40,6 +44,7 @@ describe("live probe (real Ollama)", () => {
       kernelEventBus.on("MEMORY_APPEND", (p: any) => seen.push(`MEMORY_APPEND(${p.source}):${p.content}`)),
       kernelEventBus.on("AVATAR_THOUGHT", (p: any) => seen.push(`AVATAR_THOUGHT(${p.kind}):${p.text ?? ""}`)),
       kernelEventBus.on("PHYSICAL_INTENT_DISPATCH", (p: any) => seen.push(`PHYSICAL_INTENT_DISPATCH:${JSON.stringify(p)}`)),
+      kernelEventBus.on("INTENT_NORMALIZED", (p: any) => seen.push(`INTENT_NORMALIZED raw="${p.raw}" → ${p.normalized} (matched=${p.matched})`)),
       kernelEventBus.on("STATE_MOOD_CHANGED", (p: any) => seen.push(`STATE_MOOD_CHANGED:${p.mood}`)),
     ];
 

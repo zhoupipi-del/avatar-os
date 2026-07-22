@@ -11,6 +11,7 @@ export type KernelEventType =
   | "STATE_RENDER_PARAMS_CHANGED"
   | "SYSTEM_STATUS_CHANGED"
   | "AVATAR_THOUGHT"
+  | "INTENT_NORMALIZED"
   | "MEMORY_APPEND"
   | "SPEECH_INPUT"
   | "AVATAR_PRIMITIVE";
@@ -34,6 +35,13 @@ export interface KernelEventPayloads {
    * kind 扩展：thought/state(原有) + speech(LLM 说出) / thinking(LLM 思考占位) / clear(清空气泡)。
    * emoji/text 在 clear 时可省略（clear 仅用于清空，不渲染内容）。
    */
+  /**
+   * 意图归一化追踪（v0.3-M1）：CognitionEngine 调 LLM 后，把原始意图字符串与
+   * 归一化结果广播出来。DebugConsole 据此打印 raw → normalized，让"LLM 到底吐了啥"
+   * 永远可观测；UNKNOWN 的原始证据也借此留存，供未来 Intent Router 训练。
+   * normalized 用 string 而非 NormalizedIntent，避免 runtime 反向依赖 cognition 包（红线）。
+   */
+  INTENT_NORMALIZED: { raw: string; normalized: string; matched: boolean };
   AVATAR_THOUGHT: {
     emoji?: string;
     text?: string;
