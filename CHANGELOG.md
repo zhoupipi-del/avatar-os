@@ -32,19 +32,44 @@
 
 ---
 
-## v0.3.1.1 — Runtime State Snapshot · 2026-07-22
+## v0.3.1.1 — Runtime State Snapshot（只读生命体监护仪）· 2026-07-22
 
-**给生命体装一个"心电监护仪"——只读、不改变逻辑。**
+**给生命体装一个"心电监护仪"——只采集已有状态，绝不创造状态、绝不控制行为。**
 
-- 在 DebugConsole 展开态顶部新增 `LIVE STATE` 只读面板，从现有事件订阅派生当前快照：
-  `Intent / Action / Clip / Speech / Mood / Match(✅|⚠ UNKNOWN)`。
-  - `Intent/Action` ← `INTENT_NORMALIZED` / `PHYSICAL_INTENT_DISPATCH`
-  - `Clip` ← `AVATAR_PRIMITIVE` 的 `detail="clip=NlaTrack.001"`（实时读出当前播放片段）
-  - `Speech` ← `AVATAR_THOUGHT(speech)`
-  - `Mood` ← `STATE_MOOD_CHANGED`
-- **不引入 `confidence`**：当前 Cognition 引擎不产出置信度，以 normalizer 的 `matched` 布尔作为"大脑判断可信度"的诚实替代（✅匹配 / ⚠ UNKNOWN）。
-- 复用既有 `snapshot-manager.ts`（`driveEngine.getState()` / `avatarFSM.getMood()`）作为结构化状态源的可选扩展方向，但 v0.3.1.1 不重造模块、不新增运行时依赖。
-- 零逻辑改动：仅 DebugConsole 增加只读订阅与展示，EventBus / Runtime / Avatar 一律不动。
+边界在此版本被【再次收紧】，逐条冻结：
+- ❌ 不新增 Store / Redux / Zustand（无订阅 API、无响应式）
+- ❌ 不新增 EventBus（只订阅已存在的 `kernelEventBus`）
+- ❌ 不修改 Cognition / BehaviorVM / AvatarAdapter（零逻辑改动）
+- ❌ 不做轮询（无 `setInterval` 刷新，纯事件驱动：哪里发生事件，哪里留痕）
+- ❌ 不写回任何状态
+
+### 实现（旁路只读）
+- 新增 `packages/runtime/src/agent-runtime-snapshot.ts`：定义 `AgentRuntimeSnapshot` 接口 +
+  纯函数式写入（`recordIntent/recordSpeech/recordAction/recordClip/recordMood`）。
+  这是一个**数据容器**，不是状态管理系统——无 `SnapshotManager` 的 `restoreState` 写回，
+  与崩溃恢复的 `snapshot-manager.ts` 明确划清界限（v0.3.1.1 不碰它）。
+- `DebugConsole` 的 LIVE STATE 面板改为订阅事件并经上述纯函数写入：
+  - `cognition.lastIntent` ← `INTENT_NORMALIZED.normalized`
+  - `cognition.speech`     ← `AVATAR_THOUGHT(speech)`
+  - `behavior.currentAction` ← `PHYSICAL_INTENT_DISPATCH.type`
+  - `behavior.currentClip` / `avatar.animation` ← `AVATAR_PRIMITIVE` 的 `detail="clip=NlaTrack.001"`
+    （动画片段一旦派发到身体即视为"playing"；不改 `AnimationManager`，AvatarAdapter 保持冻结）
+  - `avatar.mood` ← `STATE_MOOD_CHANGED.mood`
+
+### 两个"先验真"纠偏
+- **不存在 `COGNITION_DECISION` 事件**：规格初稿假设了它，但事件总线里没有。
+  按"先验真、再改代码"原则，不虚构事件，改用真实存在的 `INTENT_NORMALIZED` 作为认知侧事实源。
+- **`confidence` 不编造**：Cognition 引擎当前不产出置信度。类型定义为 `number | null`，
+  字段恒定保持 `null`——绝不塞一个假数字。真实环境一旦在事件里携带置信度，此处即填充，无需改结构。
+
+### 展示
+- LIVE STATE 置于标题正下方、EVENT TRACE 上方；纯文本、无颜色、无状态指示灯。
+  顺序：`Intent / Speech / Action / Clip / Avatar(playing|idle) / Mood`。
+- 关闭 DebugConsole 完全不影响 Avatar（快照是旁路，不回写、不驱动任何行为）。
+
+### 验证
+- 新增 `agent-runtime-snapshot.spec.ts`（5 例）锁死"采集不创造"契约，
+  含 `confidence` 恒为 `null`、`recordClip` 同源驱动 `currentClip` 与 `animation`、写入纯函数不可变性。
 
 ---
 

@@ -10,6 +10,7 @@ export * from "./kernel";
 export * from "./runtime-kernel";
 export * from "./utils/throttle";
 export * from "./snapshot-manager";
+export * from "./agent-runtime-snapshot";
 export * from "./agent-sandbox";
 export * from "./thoughts";
 export * from "./avatar-adapter";

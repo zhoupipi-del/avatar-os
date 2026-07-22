@@ -10,21 +10,22 @@
 //   - 输入框 emit SPEECH_INPUT，走真实 Cognition 链路
 //   - "Body test" 按钮经 AgentSandbox 直接驱动身体（明确标注"无大脑"），
 //     用于在不依赖 Ollama 时单独验证动画/姿态映射
+//   - LIVE STATE 只是旁路只读监护仪：订阅已有事件，绝不回写、绝不轮询、绝不控制行为
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
-import { kernelEventBus, AgentSandbox } from "@avatar-os/runtime";
+import {
+  kernelEventBus,
+  AgentSandbox,
+  createInitialSnapshot,
+  recordIntent,
+  recordSpeech,
+  recordAction,
+  recordClip,
+  recordMood,
+  type AgentRuntimeSnapshot,
+} from "@avatar-os/runtime";
 import type { PhysicalIntentType } from "@avatar-os/primitives";
-
-interface StageState {
-  input?: string;
-  cognition?: string;
-  norm?: string;
-  intent?: string;
-  primitive?: string;
-  mood?: string;
-  memory?: string;
-}
 
 interface LogEntry {
   id: number;
@@ -60,29 +61,14 @@ const panelStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-const rowStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "3px 0",
-};
-
-function Stage({ label, value, accent }: { label: string; value?: string; accent: string }) {
+/** LIVE STATE 单行：label 与 value 分行，纯文本、无颜色、无状态指示灯。 */
+function LiveRow({ label, value }: { label: string; value: string | null }) {
   return (
-    <div style={rowStyle}>
-      <span style={{ width: 92, color: "#8aa0c8", flexShrink: 0 }}>{label}</span>
-      <span
-        style={{
-          flex: 1,
-          color: value ? accent : "#4a5878",
-          background: value ? "rgba(255,255,255,0.04)" : "transparent",
-          padding: "2px 6px",
-          borderRadius: 4,
-          wordBreak: "break-all",
-        }}
-      >
+    <div style={{ padding: "1px 0" }}>
+      <div style={{ color: "#8aa0c8" }}>{label}:</div>
+      <div style={{ paddingLeft: 10, color: value ? "#d7e3ff" : "#4a5878", wordBreak: "break-all" }}>
         {value ?? "—"}
-      </span>
+      </div>
     </div>
   );
 }
@@ -91,18 +77,10 @@ export function DebugConsole() {
   const [collapsed, setCollapsed] = useState(true);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
-  const [stages, setStages] = useState<StageState>({});
+  // LIVE STATE 只读监护仪：唯一事实源是 AgentRuntimeSnapshot，
+  // 全部由下方事件订阅经纯函数写入（recordX），本组件不创造任何状态。
+  const [snapshot, setSnapshot] = useState<AgentRuntimeSnapshot>(createInitialSnapshot());
   const [log, setLog] = useState<LogEntry[]>([]);
-  // LIVE STATE 只读监护仪：从现有事件订阅派生的"当前快照"，不引入任何新逻辑/新依赖。
-  // 注意：引擎不产出 confidence，故以 normalizer 的 matched 布尔作为"大脑判断可信度"的诚实替代。
-  const [live, setLive] = useState<{
-    intent?: string;
-    action?: string;
-    clip?: string;
-    speech?: string;
-    mood?: string;
-    matched?: boolean;
-  }>({});
   const logId = useRef(0);
 
   useEffect(() => {
@@ -111,70 +89,64 @@ export function DebugConsole() {
       setLog((prev) => [{ id, stage, text }, ...prev].slice(0, 200));
     };
 
-    const u1 = kernelEventBus.on("SPEECH_INPUT", (p) => {
-      setStages((s) => ({ ...s, input: p.text }));
-      pushLog("INPUT", `「${p.text}」`);
-    });
-
-    const u2 = kernelEventBus.on("AVATAR_THOUGHT", (p) => {
+    // —— 认知侧 ——
+    const uThink = kernelEventBus.on("AVATAR_THOUGHT", (p) => {
       if (p.kind === "thinking") {
         setThinking(true);
-        setStages((s) => ({ ...s, cognition: "🤔 思考中…" }));
         pushLog("COGNITION", "thinking…");
       } else if (p.kind === "clear") {
         setThinking(false);
-        setStages((s) => ({ ...s, cognition: undefined }));
         pushLog("COGNITION", "clear");
       } else {
         setThinking(false);
-        const label = p.kind === "speech" ? "💬" : p.kind === "state" ? "📣" : "💭";
-        setStages((s) => ({ ...s, cognition: `${label} ${p.text ?? ""}` }));
-        if (p.kind === "speech") setLive((s) => ({ ...s, speech: p.text ?? "" }));
+        if (p.kind === "speech") setSnapshot((s) => recordSpeech(s, p.text ?? ""));
         pushLog("COGNITION", `${p.kind}: ${p.text ?? ""}`);
       }
     });
 
-    const u3 = kernelEventBus.on("PHYSICAL_INTENT_DISPATCH", (p) => {
-      setStages((s) => ({ ...s, intent: p.type }));
-      setLive((s) => ({ ...s, action: p.type }));
-      pushLog("INTENT", p.type);
-    });
-
-    // 意图归一化追踪：把 LLM 原始意图(raw)与归一化结果打印出来，
-    // "LLM 到底吐了啥" 永远可观测；UNKNOWN 的原始证据也借此留存（未来 Intent Router 训练）。
+    // INTENT_NORMALIZED 是真实存在的"大脑决策"事件（无 COGNITION_DECISION 事件，故不虚构）。
     const uNorm = kernelEventBus.on("INTENT_NORMALIZED", (p) => {
-      setStages((s) => ({ ...s, norm: `${p.raw || "∅"} ⇒ ${p.normalized}` }));
-      setLive((s) => ({ ...s, intent: p.normalized, matched: p.matched }));
+      setSnapshot((s) => recordIntent(s, p.normalized));
       const tag = !p.matched ? "UNKNOWN⚠" : p.normalized === "NONE" ? "NONE" : "normalized";
       pushLog("COGNITION", `${tag}: raw="${p.raw}" → ${p.normalized}`);
     });
 
-    const u4 = kernelEventBus.on("AVATAR_PRIMITIVE", (p) => {
-      setStages((s) => ({ ...s, primitive: `${p.type} · ${p.detail}` }));
-      // PLAY_ANIMATION 的 detail 形如 "clip=NlaTrack.001"，实时读出当前播放片段名
-      if (p.detail.startsWith("clip=")) setLive((s) => ({ ...s, clip: p.detail.slice(5) }));
+    // —— 行为侧 ——
+    const uIntent = kernelEventBus.on("PHYSICAL_INTENT_DISPATCH", (p) => {
+      setSnapshot((s) => recordAction(s, p.type));
+      pushLog("INTENT", p.type);
+    });
+
+    // —— 身体侧（动画片段派发 = 身体正在播放）——
+    const uPrimitive = kernelEventBus.on("AVATAR_PRIMITIVE", (p) => {
+      if (p.detail.startsWith("clip=")) {
+        setSnapshot((s) => recordClip(s, p.detail.slice(5)));
+      }
       pushLog("POSE/ANIM", `${p.type} ${p.detail}`);
     });
 
-    const u5 = kernelEventBus.on("STATE_MOOD_CHANGED", (p) => {
-      setStages((s) => ({ ...s, mood: p.mood }));
-      setLive((s) => ({ ...s, mood: p.mood }));
+    const uMood = kernelEventBus.on("STATE_MOOD_CHANGED", (p) => {
+      setSnapshot((s) => recordMood(s, p.mood));
       pushLog("MOOD", p.mood);
     });
 
-    const u6 = kernelEventBus.on("MEMORY_APPEND", (p) => {
-      setStages((s) => ({ ...s, memory: `${p.source}: ${p.content.slice(0, 24)}` }));
+    // —— 输入 / 记忆：仅入日志，不进 LIVE STATE（它们是"发生了什么"，不是"当前状态"）——
+    const uInput = kernelEventBus.on("SPEECH_INPUT", (p) => {
+      pushLog("INPUT", `「${p.text}」`);
+    });
+
+    const uMemory = kernelEventBus.on("MEMORY_APPEND", (p) => {
       pushLog("MEMORY", `${p.source}: ${p.content.slice(0, 24)}`);
     });
 
     return () => {
-      u1();
-      u2();
-      u3();
+      uThink();
       uNorm();
-      u4();
-      u5();
-      u6();
+      uIntent();
+      uPrimitive();
+      uMood();
+      uInput();
+      uMemory();
     };
   }, []);
 
@@ -229,33 +201,21 @@ export function DebugConsole() {
         </span>
       </div>
 
+      {/* LIVE STATE · 只读监护仪：当前生命状态（纯文本，无颜色） */}
       <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(120,160,255,0.12)" }}>
         <div style={{ color: "#8aa0c8", fontSize: 11, letterSpacing: 0.5, marginBottom: 4 }}>
-          LIVE STATE · 心电监护仪（只读）
+          LIVE STATE · 只读监护仪
         </div>
-        <Stage label="Intent" value={live.intent} accent="#b69bff" />
-        <Stage label="Action" value={live.action} accent="#b69bff" />
-        <Stage label="Clip" value={live.clip} accent="#7dffa8" />
-        <Stage label="Speech" value={live.speech} accent="#ffd479" />
-        <Stage label="Mood" value={live.mood} accent="#ff9bd0" />
-        <Stage
-          label="Match"
-          value={live.matched === undefined ? undefined : live.matched ? "✅" : "⚠ UNKNOWN"}
-          accent="#ff9bd0"
-        />
+        <LiveRow label="Intent" value={snapshot.cognition.lastIntent} />
+        <LiveRow label="Speech" value={snapshot.cognition.speech} />
+        <LiveRow label="Action" value={snapshot.behavior.currentAction} />
+        <LiveRow label="Clip" value={snapshot.behavior.currentClip} />
+        <LiveRow label="Avatar" value={snapshot.avatar.animation ? "playing" : "idle"} />
+        <LiveRow label="Mood" value={snapshot.avatar.mood} />
       </div>
 
+      {/* 控制台：输入 + 身体自测（不依赖大脑） */}
       <div style={{ padding: "8px 10px" }}>
-        <Stage label="INPUT" value={stages.input} accent="#9fe6ff" />
-        <Stage label="COGNITION" value={stages.cognition} accent="#ffd479" />
-        <Stage label="INTENT(raw)" value={stages.norm} accent="#b69bff" />
-        <Stage label="INTENT" value={stages.intent} accent="#b69bff" />
-        <Stage label="POSE/ANIM" value={stages.primitive} accent="#7dffa8" />
-        <Stage label="MOOD" value={stages.mood} accent="#ff9bd0" />
-        <Stage label="MEMORY" value={stages.memory} accent="#c7d2e0" />
-      </div>
-
-      <div style={{ padding: "0 10px 8px", display: "flex", gap: 6 }}>
         <input
           value={input}
           disabled={thinking}
@@ -265,7 +225,7 @@ export function DebugConsole() {
           }}
           placeholder={thinking ? "思考中…" : "说点什么，回车发送"}
           style={{
-            flex: 1,
+            width: "100%",
             background: "rgba(255,255,255,0.06)",
             border: "1px solid rgba(120,160,255,0.3)",
             borderRadius: 6,
@@ -275,20 +235,6 @@ export function DebugConsole() {
             opacity: thinking ? 0.6 : 1,
           }}
         />
-        <button
-          onClick={submit}
-          disabled={thinking}
-          style={{
-            background: "rgba(120,160,255,0.25)",
-            border: "1px solid rgba(120,160,255,0.4)",
-            borderRadius: 6,
-            color: "#d7e3ff",
-            padding: "6px 10px",
-            cursor: thinking ? "default" : "pointer",
-          }}
-        >
-          发送
-        </button>
       </div>
 
       <div style={{ padding: "0 10px 8px", display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -314,9 +260,11 @@ export function DebugConsole() {
         ))}
       </div>
 
-      <div style={{ padding: "0 10px 4px", color: "#6b7da0", fontSize: 10.5, lineHeight: 1.4 }}>
-        断点定位：① Body测试(不经大脑) ② 输入框自然语言(看 raw⇒normalized) ③ 若 POSE/ANIM 空白=身体端断；若 INTENT(raw) 空白=大脑/归一化断
+      <div style={{ padding: "0 10px 8px", color: "#6b7da0", fontSize: 10.5, lineHeight: 1.4 }}>
+        断点定位：① Body测试(不经大脑) ② 输入框自然语言(看 COGNITION raw⇒normalized) ③ 若 POSE/ANIM 空白=身体端断；若 COGNITION 无 UNKNOWN/normalized 行=大脑/归一化断
       </div>
+
+      {/* EVENT TRACE · 最近发生了什么（详细日志） */}
       <div
         style={{
           borderTop: "1px solid rgba(120,160,255,0.2)",
@@ -326,6 +274,9 @@ export function DebugConsole() {
           background: "rgba(0,0,0,0.2)",
         }}
       >
+        <div style={{ color: "#8aa0c8", fontSize: 11, letterSpacing: 0.5, marginBottom: 4 }}>
+          EVENT TRACE
+        </div>
         {log.length === 0 ? (
           <div style={{ color: "#4a5878" }}>// 链路日志为空，从输入框发一句话试试</div>
         ) : (
