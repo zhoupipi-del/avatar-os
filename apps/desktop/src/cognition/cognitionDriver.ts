@@ -16,8 +16,16 @@ import { OllamaProvider, CognitionEngine } from "@avatar-os/cognition";
 import { AgentSandbox, avatarFSM, driveEngine } from "@avatar-os/runtime";
 import type { CognitionDriver, StimulusInput } from "@avatar-os/runtime";
 
-/** 本地 Ollama 模型；与 CognitionEngine 的默认 baseUrl(localhost:11434) 对齐 */
-const LOCAL_MODEL = "qwen2.5:14b";
+/**
+ * 本地 Ollama 模型。
+ * 构建期环境变量 VITE_OLLAMA_MODEL 可覆盖（如换 qwen2.5:7b / 14b），未设置时兜底 qwen2.5:0.5b——
+ * 它已验证可经 CognitionEngine 正常产出中文 speech + 合法 intent/mood，保证"开箱即活"。
+ */
+function resolveLocalModel(): string {
+  const fromVite = (import.meta as any)?.env?.VITE_OLLAMA_MODEL as string | undefined;
+  return fromVite || "qwen2.5:0.5b";
+}
+const LOCAL_MODEL = resolveLocalModel();
 
 /**
  * 创建认知驱动实例（单例语义：每次调用返回新实例，desktop 应在 bootstrap 中只调一次）。

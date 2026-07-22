@@ -108,7 +108,11 @@ export class OllamaProvider implements LLMProvider {
       return { ok: false };
     }
 
-    const content = (data as { message?: { content?: string } })?.message?.content ?? "";
+    // ⚠️ 关键：/api/generate 的返回体里文本在 `response` 字段（string），
+    // 而 /api/chat 才是 `message.content`。这里两个都兼容，避免读错字段导致永远拿不到文本
+    // （曾因此误判为"模型弱/空响应降级"，实则 provider 取错字段）。
+    const d = data as { response?: string; message?: { content?: string } };
+    const content = d.response ?? d.message?.content ?? "";
     const parsed = extractStructured(content);
 
     const mood = isMood(parsed.mood) ? parsed.mood : undefined;
