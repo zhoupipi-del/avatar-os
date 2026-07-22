@@ -67,6 +67,23 @@ export class BehaviorVMAdapter {
 
   /** 把原子指令派发到具体执行器；身体不支持的 primitive 在此优雅忽略（面向能力编程） */
   private dispatch(cmd: PrimitiveCommand): void {
+    // 全链路可观测：每派发一条原子指令即广播追踪事件，供 Debug Console 呈现 POSE/ANIMATION 阶段
+    const traceDetail = (() => {
+      switch (cmd.type) {
+        case PhysicalPrimitive.PLAY_ANIMATION:
+          return `clip=${(cmd.payload.clip as string) ?? "?"}`;
+        case PhysicalPrimitive.SPEECH_BUBBLE:
+          return `text=${(cmd.payload.text as string) ?? "?"}`;
+        case PhysicalPrimitive.BODY_LEAN:
+          return `angleX=${(cmd.payload.angleXDeg as number) ?? "?"}°`;
+        case PhysicalPrimitive.HEAD_TILT:
+          return `angleZ=${(cmd.payload.angleZDeg as number) ?? "?"}°`;
+        default:
+          return JSON.stringify(cmd.payload);
+      }
+    })();
+    kernelEventBus.emit("AVATAR_PRIMITIVE", { type: cmd.type, detail: traceDetail });
+
     switch (cmd.type) {
       case PhysicalPrimitive.PLAY_ANIMATION: {
         const clip = cmd.payload.clip as string | undefined;

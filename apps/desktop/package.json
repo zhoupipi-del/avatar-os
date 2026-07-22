@@ -10,6 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@avatar-os/cognition": "workspace:*",
     "@avatar-os/memory": "workspace:*",
     "@avatar-os/morphology": "workspace:*",
     "@avatar-os/presence": "workspace:*",

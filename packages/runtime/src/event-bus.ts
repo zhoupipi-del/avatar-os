@@ -12,7 +12,8 @@ export type KernelEventType =
   | "SYSTEM_STATUS_CHANGED"
   | "AVATAR_THOUGHT"
   | "MEMORY_APPEND"
-  | "SPEECH_INPUT";
+  | "SPEECH_INPUT"
+  | "AVATAR_PRIMITIVE";
 
 export interface KernelEventPayloads {
   SENSOR_MOUSE_MOVE: { x: number; y: number };
@@ -52,6 +53,15 @@ export interface KernelEventPayloads {
   SPEECH_INPUT: {
     text: string;
     timestamp: number;
+  };
+  /**
+   * 具身执行追踪：BehaviorVMAdapter 每派发一条 PrimitiveCommand 即广播，
+   * 供 Debug Console 把"INTENT → POSE/ANIMATION"这一段链路完整呈现。
+   * detail 根据 type 携带 clip / text / angle 等，便于肉眼核对动画是否真的播放。
+   */
+  AVATAR_PRIMITIVE: {
+    type: string;
+    detail: string;
   };
 }
 

@@ -3,9 +3,20 @@ import { Avatar } from "./avatar/Avatar";
 import { presenceEngine } from "@avatar-os/presence";
 import { telemetry } from "@avatar-os/telemetry";
 import { memoryStore } from "@avatar-os/memory";
-import { eventBus, LifeLoop, behaviorVM, registerDefaultRules, AgentSandbox } from "@avatar-os/runtime";
+import {
+  eventBus,
+  LifeLoop,
+  behaviorVM,
+  registerDefaultRules,
+  AgentSandbox,
+  RuntimeKernel,
+  avatarFSM,
+  driveEngine,
+} from "@avatar-os/runtime";
 import { PresenceSensorLayer } from "@avatar-os/sensor";
 import { setClickThrough } from "./window/window-state";
+import { createCognitionDriver } from "./cognition/cognitionDriver";
+import { DebugConsole } from "./debug/DebugConsole";
 
 const DRIVE_TICK_MS = 1000;
 
@@ -19,6 +30,7 @@ export default function App() {
     let lifeLoop: LifeLoop | null = null;
     let presenceLayer: PresenceSensorLayer | null = null;
     let unbindMood: (() => void) | null = null;
+    let runtimeKernel: RuntimeKernel | null = null;
 
     const bootstrap = async () => {
       // 自举顺序：遥测订阅 → 记忆库初始化（建 SQLite 表）→ 行为规则注册
@@ -61,11 +73,31 @@ export default function App() {
         const drowsy = p.mood === "SLEEPING" || p.mood === "TIRED";
         void setClickThrough(drowsy);
       });
+
+      // ===== 闭环验证期：RuntimeKernel 负责把大脑接进运行中的程序 =====
+      // 设计红线：App 只做装配，绝不在此直接 new CognitionEngine()。
+      // 真引擎由 desktop 胶水 cognitionDriver 创建并注入 CognitionDriver 接口。
+      runtimeKernel = new RuntimeKernel({
+        cognition: createCognitionDriver(),
+        memory: memoryStore,
+        getLifeState: () => {
+          const mood = avatarFSM.getMood().current;
+          const state = driveEngine.getState();
+          return {
+            mood,
+            energy: state.energy,
+            loneliness: state.pressures.lonelinessPressure,
+          };
+        },
+        proactive: { enabled: true, lonelinessThreshold: 0.7, intervalMs: 30_000, idleMs: 60_000 },
+      });
+      runtimeKernel.start();
     };
     void bootstrap();
 
     return () => {
       unbindMood?.();
+      runtimeKernel?.stop();
       lifeLoop?.stop();
       presenceLayer?.stop();
     };
@@ -82,6 +114,7 @@ export default function App() {
       }}
     >
       <Avatar />
+      {import.meta.env.DEV && <DebugConsole />}
     </main>
   );
 }
