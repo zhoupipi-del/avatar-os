@@ -192,12 +192,29 @@ export function DebugConsole() {
         }}
       >
         <span style={{ fontWeight: 700, letterSpacing: 0.5 }}>🐶 AvatarOS · Runtime Debug</span>
-        <span
-          onClick={() => setCollapsed(true)}
-          style={{ cursor: "pointer", color: "#8aa0c8", padding: "0 4px" }}
-          title="折叠"
-        >
-          ▢
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={() => (location.search = "inspect=1")}
+            title="动作标定：进入 Inspect 模式，替换 Avatar 渲染"
+            style={{
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 6,
+              color: "#c7d2e0",
+              padding: "2px 6px",
+              cursor: "pointer",
+              fontSize: 11,
+            }}
+          >
+            🎞 INSPECT
+          </button>
+          <span
+            onClick={() => setCollapsed(true)}
+            style={{ cursor: "pointer", color: "#8aa0c8", padding: "0 4px" }}
+            title="折叠"
+          >
+            ▢
+          </span>
         </span>
       </div>
 

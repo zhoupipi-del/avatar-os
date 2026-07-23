@@ -17,6 +17,7 @@ import { PresenceSensorLayer } from "@avatar-os/sensor";
 import { setClickThrough } from "./window/window-state";
 import { createCognitionDriver } from "./cognition/cognitionDriver";
 import { DebugConsole } from "./debug/DebugConsole";
+import { AnimationInspector } from "./avatar/skins/AnimationInspector";
 
 const DRIVE_TICK_MS = 1000;
 
@@ -103,6 +104,12 @@ export default function App() {
     };
   }, []);
 
+  // DEV-only 只读开关：不引入新状态管理，仅读 URL query。
+  // Inspect 与生产 Avatar 是「替换」关系，不可共存——见 AnimationInspector.tsx
+  // 挂载示例注释：useGLTF 按 URL 全局缓存 scene，双挂会抢同一个 Object3D。
+  const inspect =
+    import.meta.env.DEV && new URLSearchParams(location.search).has("inspect");
+
   return (
     <main
       style={{
@@ -113,7 +120,7 @@ export default function App() {
         alignItems: "center",
       }}
     >
-      <Avatar />
+      {inspect ? <AnimationInspector /> : <Avatar />}
       {import.meta.env.DEV && <DebugConsole />}
     </main>
   );

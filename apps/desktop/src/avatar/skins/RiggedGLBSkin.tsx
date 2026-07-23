@@ -37,16 +37,25 @@ const ROBOT_CONFIG: RigConfig = {
 
 // bag character（Tripo/AI 生成）：真·骨骼(41 关节) + 3 条 NLA 整段动作，无面部形变。
 // 3 个 clip 实为 NlaTrack/NlaTrack.001/NlaTrack.002（Blender 导出残留名，无语义），
-// 下面是按"时长"做的近似映射，BOSS 需实际看哪条是挥手再校准：
-//   NlaTrack(4.00s)       → 待机
-//   NlaTrack.001(2.58s)   → 打招呼/出错（最短，像定点动作）
-//   NlaTrack.002(12.79s)  → 成功/欢呼（最长，大幅动作）
+// 已用 AnimationInspector 真机肉眼标定（v0.3.2, 2026-07-22）：
+//   NlaTrack(4.00s)       → 招手（GREET）
+//   NlaTrack.001(2.58s)   → 抱头（无对应意图，悬空不接）
+//   NlaTrack.002(12.79s)  → 跳舞/欢呼（BOUNCE_HAPPY）
+// 注意：三条全是"动作"，无静息呼吸轨 → idleClip 置空（待机=默认静止 pose），
+// 生命感交给 v0.3.3 Procedural Idle 程序化呼吸叠加（静止 pose 是干净起点）。
+// STRETCH/DOZE 不写进 intentClip（删键 ≠ 空串，运行时等价）：clipFor 查不到键
+// → undefined(falsy) → 落到同组 tiltFor 头部倾斜降级（见 embodiment-runtime.ts:86-94）。
 const BAG_CONFIG: RigConfig = {
   url: "/models/bag-character.glb",
   headBone: /^head$/i,
-  idleClip: "NlaTrack",
-  intentClip: { GREET: "NlaTrack.001", BOUNCE_HAPPY: "NlaTrack.002", STRETCH: "NlaTrack.001", DOZE: "NlaTrack" },
-  statusClip: { success: "NlaTrack.002", error: "NlaTrack.001" },
+  idleClip: "", // 待机=静止 pose，生命感交给 v0.3.3 程序化呼吸叠加
+  intentClip: {
+    GREET: "NlaTrack",            // 招手，肉眼标定
+    BOUNCE_HAPPY: "NlaTrack.002", // 跳舞，肉眼标定
+    // STRETCH / DOZE 不填：clipFor 查不到键 → falsy → 落到 tiltFor 姿态降级
+    // （embodiment-runtime.ts:86-94 已核实，删键 = 空字符串 运行时等价，此处删键更干净）
+  },
+  statusClip: { success: "NlaTrack.002", error: "NlaTrack.001" }, // 本轮未标定，原值保留
   spineBone: "Spine01",
   fitHeight: 2.6,
 };
