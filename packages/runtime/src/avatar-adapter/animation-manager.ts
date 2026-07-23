@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { buildAnimationOwnershipMap, type AnimationOwnershipMap } from "./animation-channel-scanner";
 
 export interface AnimationManagerOptions {
   /** 默认循环片段（Idle/待机），playOnce 播完自动回它 */
@@ -75,6 +76,26 @@ export class AnimationManager {
   /** 每帧推进混合器（由渲染层 useFrame 调用） */
   public tick(delta: number): void {
     this.mixer.update(delta);
+  }
+
+  /**
+   * v0.3.4-B+ Phase 1：Animation Capability Discovery。
+   * 扫描当前所有已注册 clip 的 tracks，推导每个 clip 会写入哪些「骨骼.通道」。
+   * 纯只读、不接仲裁、不改变任何播放/写入行为。结果供 Phase 2 Ownership Runtime
+   * 查询（当前系统第一次「知道」一个动画碰哪些自由度）。
+   * actions 含原名+小写别名指向同一 AnimationAction，故按 clip.uuid 去重。
+   */
+  public discoverOwnership(): AnimationOwnershipMap {
+    const clips: THREE.AnimationClip[] = [];
+    const seen = new Set<string>();
+    for (const action of this.actions.values()) {
+      const clip = action.getClip();
+      if (!clip) continue;
+      if (seen.has(clip.uuid)) continue;
+      seen.add(clip.uuid);
+      clips.push(clip);
+    }
+    return buildAnimationOwnershipMap(clips);
   }
 
   private resolve(name: string): THREE.AnimationAction | undefined {
