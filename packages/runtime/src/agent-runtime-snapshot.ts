@@ -37,6 +37,12 @@ export interface AgentRuntimeSnapshot {
     animation: string | null;
     /** 当前情绪（来源：STATE_MOOD_CHANGED.mood） */
     mood: string | null;
+    /**
+     * 当前激活的身体 profile id（来源：AvatarService.activeId）。
+     * 非事实源——事实在 AvatarService；此处由 DebugConsole 旁路订阅写入，
+     * 与上面各字段同为"只读镜像"，便于在一处监护仪里看清"大脑驱动的是哪副身体"。
+     */
+    activeAvatarId: string | null;
   };
   /** 最近一次留痕的时间戳（ms） */
   timestamp: number;
@@ -47,7 +53,7 @@ export function createInitialSnapshot(): AgentRuntimeSnapshot {
   return {
     cognition: { lastIntent: null, confidence: null, speech: null },
     behavior: { currentAction: null, currentClip: null },
-    avatar: { animation: null, mood: null },
+    avatar: { animation: null, mood: null, activeAvatarId: null },
     timestamp: 0,
   };
 }
@@ -80,4 +86,12 @@ export function recordClip(s: AgentRuntimeSnapshot, clip: string): AgentRuntimeS
 
 export function recordMood(s: AgentRuntimeSnapshot, mood: string): AgentRuntimeSnapshot {
   return { ...s, avatar: { ...s.avatar, mood }, timestamp: Date.now() };
+}
+
+/**
+ * 记录当前激活的身体 profile id（来源：AvatarService.activeId）。
+ * 纯函数式写入，与 recordClip 等同构；事实在 AvatarService，此处只读镜像。
+ */
+export function recordAvatarProfile(s: AgentRuntimeSnapshot, id: string): AgentRuntimeSnapshot {
+  return { ...s, avatar: { ...s.avatar, activeAvatarId: id }, timestamp: Date.now() };
 }

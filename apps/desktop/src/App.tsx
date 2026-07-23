@@ -18,6 +18,7 @@ import { setClickThrough } from "./window/window-state";
 import { createCognitionDriver } from "./cognition/cognitionDriver";
 import { DebugConsole } from "./debug/DebugConsole";
 import { AnimationInspector } from "./avatar/skins/AnimationInspector";
+import { avatarService, attachAvatarPersistence, IN_MEMORY_AVATAR_STORAGE } from "./avatar/avatar-profiles";
 
 const DRIVE_TICK_MS = 1000;
 
@@ -32,6 +33,7 @@ export default function App() {
     let presenceLayer: PresenceSensorLayer | null = null;
     let unbindMood: (() => void) | null = null;
     let runtimeKernel: RuntimeKernel | null = null;
+    let unbindAvatarPersistence: (() => void) | null = null;
 
     const bootstrap = async () => {
       // 自举顺序：遥测订阅 → 记忆库初始化（建 SQLite 表）→ 行为规则注册
@@ -93,11 +95,16 @@ export default function App() {
         proactive: { enabled: true, lonelinessThreshold: 0.7, intervalMs: 30_000, idleMs: 60_000 },
       });
       runtimeKernel.start();
+
+      // 身体所有权装配：从存储恢复 active avatar（Phase C 接真实存储），
+      // 并订阅变更回写。AvatarService 持有事实，App 仅做 Composition Root 接线，不拥有状态。
+      unbindAvatarPersistence = attachAvatarPersistence(avatarService, IN_MEMORY_AVATAR_STORAGE);
     };
     void bootstrap();
 
     return () => {
       unbindMood?.();
+      unbindAvatarPersistence?.();
       runtimeKernel?.stop();
       lifeLoop?.stop();
       presenceLayer?.stop();

@@ -161,9 +161,9 @@ export function StandardAvatarSkin({ mood, config = BAG_CONFIG }: SkinProps & { 
   );
 }
 
-/** MVP 身体：直接以 bag character 配置挂载 */
-export function StandardMVPSkin({ mood }: SkinProps) {
-  return <StandardAvatarSkin mood={mood} config={BAG_CONFIG} />;
-}
+// 注（v0.3.4-A）：原 StandardMVPSkin 薄壳已移除——它在下方写死 `config={BAG_CONFIG}`，
+// 使"当前身体"由 UI 组件常量决定（隐式所有权落点）。
+// 现由 Avatar.tsx 经 avatarService 解析 profile 后，把 config 作为 prop 下传，
+// StandardAvatarSkin 只认 config prop（默认 BAG_CONFIG 仅作类型兜底），不持有 active 状态。
 
 useGLTF.preload(BAG_CONFIG.url);

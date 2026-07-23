@@ -23,9 +23,11 @@ import {
   recordAction,
   recordClip,
   recordMood,
+  recordAvatarProfile,
   type AgentRuntimeSnapshot,
 } from "@avatar-os/runtime";
 import type { PhysicalIntentType } from "@avatar-os/primitives";
+import { avatarService } from "../avatar/avatar-profiles";
 
 interface LogEntry {
   id: number;
@@ -130,6 +132,11 @@ export function DebugConsole() {
       pushLog("MOOD", p.mood);
     });
 
+    // —— 身体侧（当前激活 profile，事实在 AvatarService，此处只读镜像）——
+    const uAvatar = avatarService.subscribe((s) => {
+      setSnapshot((snap) => recordAvatarProfile(snap, s.activeId));
+    });
+
     // —— 输入 / 记忆：仅入日志，不进 LIVE STATE（它们是"发生了什么"，不是"当前状态"）——
     const uInput = kernelEventBus.on("SPEECH_INPUT", (p) => {
       pushLog("INPUT", `「${p.text}」`);
@@ -139,12 +146,13 @@ export function DebugConsole() {
       pushLog("MEMORY", `${p.source}: ${p.content.slice(0, 24)}`);
     });
 
-    return () => {
+      return () => {
       uThink();
       uNorm();
       uIntent();
       uPrimitive();
       uMood();
+      uAvatar();
       uInput();
       uMemory();
     };
@@ -228,6 +236,7 @@ export function DebugConsole() {
         <LiveRow label="Action" value={snapshot.behavior.currentAction} />
         <LiveRow label="Clip" value={snapshot.behavior.currentClip} />
         <LiveRow label="Avatar" value={snapshot.avatar.animation ? "playing" : "idle"} />
+        <LiveRow label="Body" value={snapshot.avatar.activeAvatarId} />
         <LiveRow label="Mood" value={snapshot.avatar.mood} />
       </div>
 

@@ -26,8 +26,9 @@ import {
   type SystemStatus,
 } from "@avatar-os/morphology";
 import { ThoughtBubble } from "./components/ThoughtBubble";
-import { MVPSkin } from "./skins/SkinRegistry";
+import { StandardAvatarSkin } from "./skins/SkinRegistry";
 import { gazeBus } from "./skins/gazeBus";
+import { avatarService, resolveAvatarProfile } from "./avatar-profiles";
 import "./Avatar.css";
 
 interface RenderParams {
@@ -50,6 +51,16 @@ const DEFAULT_RENDER: RenderParams = {
  * - 视线偏移(frame.eyeOffset) = 本地鼠标追视(视觉) + Morphology 情绪偏置(gazeBias)
  * - 肢体角(frame.limbAngles) = 120ms gesture tick 合成(鼠标引力/键盘打字/布娃娃/系统状态)
  */
+/**
+ * 订阅 AvatarService 拿当前激活的 profile id，经 desktop 目录解析为 RigConfig。
+ * UI 不持有 active 状态——只观测 AvatarService 并解析资产（事实在 runtime）。
+ */
+function useActiveAvatarConfig() {
+  const [id, setId] = useState<string>(avatarService.getActiveId());
+  useEffect(() => avatarService.subscribe((s) => setId(s.activeId)), []);
+  return resolveAvatarProfile(id).config;
+}
+
 export function Avatar() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [mood, setMood] = useState<Mood>(avatarFSM.getMood().current);
@@ -60,6 +71,9 @@ export function Avatar() {
     limbAngles: { ...REST_LIMB_ANGLES },
   });
   const [render, setRender] = useState<RenderParams>(DEFAULT_RENDER);
+  // 当前激活身体的 RigConfig：经 avatarService(事实源) → avatar-profiles 目录解析。
+  // 不直接写死 BAG_CONFIG，所有权上提到 runtime。
+  const avatarConfig = useActiveAvatarConfig();
   // 最新渲染参数引用：供 mousemove 闭包读取，避免重注册监听
   const renderRef = useRef<RenderParams>(DEFAULT_RENDER);
 
@@ -371,7 +385,7 @@ export function Avatar() {
     <div className="avatar-root" ref={containerRef}>
       <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
-        <MVPSkin mood={mood} />
+        <StandardAvatarSkin mood={mood} config={avatarConfig} />
       </div>
       <button
         className="touch-point"

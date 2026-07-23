@@ -14,3 +14,4 @@ export * from "./agent-runtime-snapshot";
 export * from "./agent-sandbox";
 export * from "./thoughts";
 export * from "./avatar-adapter";
+export * from "./avatar-service";

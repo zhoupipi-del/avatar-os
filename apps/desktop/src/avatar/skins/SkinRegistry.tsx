@@ -1,8 +1,8 @@
 import { RiggedGLBSkin, BAG_CONFIG, ROBOT_CONFIG, type RigConfig } from "./RiggedGLBSkin";
-import { StandardAvatarSkin, StandardMVPSkin } from "./StandardAvatarSkin";
+import { StandardAvatarSkin } from "./StandardAvatarSkin";
 
 export { RiggedGLBSkin, BAG_CONFIG, ROBOT_CONFIG };
-export { StandardAvatarSkin, StandardMVPSkin };
+export { StandardAvatarSkin };
 export type { RigConfig };
 
 /** 当前 MVP 默认身体：bag character（真·骨骼 + 动作片段，无脸） */
@@ -17,5 +17,11 @@ export const SKIN_REGISTRY: Record<string, RigConfig> = {
   "rigged-glb": ROBOT_CONFIG,
 };
 
-/** MVP 身体组件：消费 bag-character 配置 + 彻底解耦的 Adapter 引擎 + AvatarLoader 归一化 */
-export const MVPSkin = StandardMVPSkin;
+/**
+ * 注（v0.3.4-A）：原 `MVPSkin = StandardMVPSkin` 别名已移除。
+ * 它曾是隐式所有权落点——StandardMVPSkin 在 StandardAvatarSkin.tsx 内
+ * 写死 `config={BAG_CONFIG}`，使"当前身体"由 UI 组件常量决定。
+ * 现在 active 身体由 @avatar-os/runtime 的 AvatarService 持有，
+ * 渲染层经 desktop 的 avatar-profiles 目录解析 config 下传，
+ * 不再需要这个硬编码壳。StandardAvatarSkin 直接以 config prop 挂载。
+ */
