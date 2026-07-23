@@ -21,9 +21,27 @@ import { useAvatarLoader } from "./avatarLoader";
 import { BAG_CONFIG } from "./RiggedGLBSkin";
 import { AnimationManager } from "@avatar-os/runtime";
 
-// 模型路径直接复用 BAG_CONFIG.url —— 以后换模型只改 RiggedGLBSkin 一处，
-// 这里自动跟着改，不用两处记。（原 TODO① 已消解）
-const MODEL_URL = BAG_CONFIG.url;
+// v0.3.4-prep-1：Inspector 观察目标可切换。仅用于标定观察，非正式 AvatarProfile——
+// warrior 动画语义尚未标定，故不填 intentClip/statusClip/camera，避免污染生产配置。
+// 路由：?inspect=warrior 看 warrior；其它（含 ?inspect=1）看 bag（默认）。
+interface InspectTarget {
+  url: string;
+  fitHeight: number;
+  idleClip: string;
+}
+const WARRIOR_INSPECT_TARGET: InspectTarget = {
+  url: "/models/fantasy-warrior.glb",
+  fitHeight: 2.6, // 与 bag 同高，相机 [0,0.3,5] fov35 不调也能框住
+  idleClip: "", // warrior 4 clip 全动 spine/head，循环 idle 会压制呼吸，观察态也保持空
+};
+const INSPECT_TARGETS: Record<"bag" | "warrior", InspectTarget> = {
+  bag: BAG_CONFIG,
+  warrior: WARRIOR_INSPECT_TARGET,
+};
+const INSPECT_TARGET: InspectTarget =
+  new URLSearchParams(location.search).get("inspect") === "warrior"
+    ? INSPECT_TARGETS.warrior
+    : INSPECT_TARGETS.bag;
 
 // 标定角色：与 BAG_CONFIG.intentClip 的键严格对齐（大写 PhysicalIntentType），
 // 外加 idle（落入独立 idleClip 字段）与 unassigned（不输出）。
@@ -51,8 +69,8 @@ interface ReadyPayload {
  */
 function InspectorModel({ onReady }: { onReady: (p: ReadyPayload) => void }) {
   const { scene, mixer, actions, transform, capabilities } = useAvatarLoader(
-    MODEL_URL,
-    BAG_CONFIG.fitHeight,
+    INSPECT_TARGET.url,
+    INSPECT_TARGET.fitHeight,
   );
   const managerRef = useRef<AnimationManager | null>(null);
   const reportedRef = useRef(false);
@@ -61,7 +79,7 @@ function InspectorModel({ onReady }: { onReady: (p: ReadyPayload) => void }) {
   // 副作用，会在渲染期改父 state，违反 React 规则）。
   useEffect(() => {
     const manager = new AnimationManager(mixer, actions, {
-      idleClip: BAG_CONFIG.idleClip,
+      idleClip: INSPECT_TARGET.idleClip,
     });
     managerRef.current = manager;
 
@@ -129,7 +147,7 @@ export function AnimationInspector() {
 
   const mappingJSON = JSON.stringify(
     {
-      model: MODEL_URL.split("/").pop(),
+      model: INSPECT_TARGET.url.split("/").pop(),
       idleClip: idleClip ?? "",
       intentClip,
     },
