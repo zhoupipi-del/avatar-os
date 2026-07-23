@@ -19,6 +19,7 @@ import type { SkinProps } from "./types";
 import type { RigConfig } from "./RiggedGLBSkin";
 import { BAG_CONFIG } from "./RiggedGLBSkin";
 import { useAvatarLoader } from "./avatarLoader";
+import { breathingOffset } from "./procedural-idle";
 
 interface Engine {
   animation: AnimationManager;
@@ -35,6 +36,10 @@ interface Engine {
 function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
   const { scene, actions, mixer, capabilities, transform } = useAvatarLoader(config.url, config.fitHeight);
   const headRef = useRef<THREE.Object3D | null>(null);
+  const spineRef = useRef<THREE.Object3D | null>(null);
+  // 骨骼绑定姿态下的原始 local position——呼吸偏移在这个基准上叠加，
+  // 不能直接覆盖 spine.position（会清空绑定姿态原有的非零偏移）。
+  const spineBasePosRef = useRef<THREE.Vector3 | null>(null);
   const engineRef = useRef<Engine | null>(null);
 
   useEffect(() => {
@@ -42,6 +47,8 @@ function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
     // spineBone 是字符串（如 "Spine01"，真实骨骼名，无虚构的 Spine）；找不到则无姿态降级
     const spine = config.spineBone ? findBoneByName(scene, config.spineBone) : null;
     headRef.current = head;
+    spineRef.current = spine;
+    spineBasePosRef.current = spine ? spine.position.clone() : null;
 
     const animation = new AnimationManager(mixer, actions, { idleClip: config.idleClip });
     const expression = new BagCharacterExpression(spine);
@@ -69,6 +76,12 @@ function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
 
     return () => {
       bridge.disconnect();
+      // HMR/重挂载防污染：把 spine.position 还原到本轮记录的绑定姿态基准，
+      // 避免下次 useEffect 重跑时 clone() 到"已叠加过呼吸偏移"的脏值，
+      // 导致开发态每次热更呼吸幅度悄悄往上漂。生产态只 mount 一次，此行为空操作。
+      const spine = spineRef.current;
+      const basePos = spineBasePosRef.current;
+      if (spine && basePos) spine.position.copy(basePos);
       engineRef.current = null;
     };
   }, [scene, actions, mixer, capabilities, config]);
@@ -94,11 +107,21 @@ function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
   }, [mood, scene]);
 
   // 每帧：推进动画混合器 + 推进姿态 lerp + 视线骨骼跟随
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     const engine = engineRef.current;
     if (!engine) return;
     engine.animation.tick(delta);
     engine.expression.update(delta);
+
+    // 待机呼吸：只碰 position，绝不碰 spine.rotation
+    //（BagCharacterExpression.update 每帧硬覆盖 rotation，写了也会被吃掉）。
+    // 在 expression.update 之后写，确保这帧最终生效的是"表情姿态 + 呼吸偏移"，
+    // 而不是被表情覆盖掉。
+    const spine = spineRef.current;
+    const basePos = spineBasePosRef.current;
+    if (spine && basePos) {
+      spine.position.y = basePos.y + breathingOffset(state.clock.elapsedTime);
+    }
 
     const head = headRef.current;
     if (head) {
