@@ -1,0 +1,24 @@
+{
+  "$schema": "avataros-calibration-record",
+  "model": "fantasy-warrior.glb",
+  "calibratedAt": "2026-07-23",
+  "calibratedBy": "BOSS 真机肉眼 (?inspect=warrior)",
+  "status": "标定记录，未接运行时（v0.3.4-prep Step3 产物；Step4 Profile Migration 时回填 FANTASY_WARRIOR_CONFIG）",
+  "idleClip": "",
+  "idleNote": "warrior 4 clip 全动 Spine01.position + Head.rotation，循环 idle 会压制 v0.3.3 程序化呼吸 → idle 仍用静止 pose + 程序化呼吸（与 bag 同策略）",
+  "clips": [
+    { "name": "NlaTrack", "observed": "下腰", "intentCandidate": null, "status": "待定" },
+    { "name": "NlaTrack.001", "observed": "抬起双手", "intentCandidate": null, "status": "待定" },
+    { "name": "NlaTrack.002", "observed": "摇头打招呼", "intentCandidate": "GREET", "status": "锁定" },
+    { "name": "NlaTrack.003", "observed": "奔跑", "intentCandidate": null, "status": "待定" }
+  ],
+  "intentClip": {
+    "GREET": "NlaTrack.002"
+  },
+  "unmapped": [
+    { "clip": "NlaTrack", "observed": "下腰", "note": "无现有 intent 槽匹配；候选 STRETCH(拉伸，bag 已删该键) / 新词 BOW(鞠躬) — 待 v0.3.4 New Intent Vocabulary" },
+    { "clip": "NlaTrack.001", "observed": "抬起双手", "note": "无现有 intent 槽匹配；候选 BOUNCE_HAPPY(勉强，bag 该键=跳舞) / 新词 CELEBRATE/SUCCESS — 待 v0.3.4" },
+    { "clip": "NlaTrack.003", "observed": "奔跑", "note": "移动类动作，bag 词汇表无对应槽；候选新词 APPROACH/RUN — 待 v0.3.4" }
+  ],
+  "vocabularyGap": "warrior(Showcase)动作语义与 bag(companion) 的 {GREET,BOUNCE_HAPPY} 词汇表不对齐。下腰/抬起双手/奔跑 三项需 v0.3.4 New Intent Vocabulary 定槽后回填，不硬塞现有槽以免语义错位。"
+}
