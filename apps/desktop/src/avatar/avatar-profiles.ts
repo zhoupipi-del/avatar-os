@@ -23,12 +23,33 @@ export interface AvatarProfile {
 }
 
 /**
+ * Fantasy Warrior（Showcase Body）— v0.3.4-B 经同一条 activate() 路径注册，不写特判。
+ * 只挂已标定的 GREET（NlaTrack.002 = 摇头打招呼）；下腰/抬起双手/奔跑 三项不注册，
+ * 等 v0.3.4 New Intent Vocabulary 给 warrior 定专属词（CELEBRATE/BOW/APPROACH…）再回填。
+ * 不接 idle clip（4 个 clip 全动 Head/Spine 的 rotation+translation+scale，循环 idle 会压呼吸），
+ * 故 idleClip="" + 程序化呼吸/headTilt（与 bag 同策略）。fitHeight=2.6 与 bag 同高，相机不调也能框住。
+ */
+const WARRIOR_CONFIG: RigConfig = {
+  url: "/models/fantasy-warrior.glb",
+  headBone: /^head$/i, // 大小写不敏感精确匹配 "Head"（warrior 骨骼首字母大写）
+  idleClip: "", // 不接 idle clip，程序化呼吸 + headTilt
+  intentClip: {
+    GREET: "NlaTrack.002", // 摇头打招呼，v0.3.4-prep Step2 真机标定
+    // 其余 clip（下腰/抬起双手/奔跑）不注册：等 New Intent Vocabulary 定 warrior 专属词再回填
+  },
+  statusClip: {}, // 系统状态暂不映射到 warrior clip（未标定，保持身体能力最简）
+  spineBone: "Spine01",
+  fitHeight: 2.6, // 与 bag 同高，相机固定 [0,0.3,5] fov35 也能框住
+};
+
+/**
  * 稳定目录：id → RigConfig。
- * 当前仅 bag-character（v0.3.4-A 只迁移所有权，不接第二个身体）。
- * fantasy-warrior 在 v0.3.4-B 经同一条 activate() 路径注册，不写特判。
+ * v0.3.4-B 起含两个身体（bag-character / fantasy-warrior），均经 AvatarService.activate() 平等切换，
+ * 不在任何渲染/大脑代码里写 `if(model==="fantasy-warrior")` 特判。
  */
 export const AVATAR_PROFILES: Record<AvatarId, AvatarProfile> = {
   "bag-character": { id: "bag-character", config: BAG_CONFIG },
+  "fantasy-warrior": { id: "fantasy-warrior", config: WARRIOR_CONFIG },
 };
 
 export const DEFAULT_AVATAR_ID: AvatarId = "bag-character";

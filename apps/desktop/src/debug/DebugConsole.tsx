@@ -27,7 +27,7 @@ import {
   type AgentRuntimeSnapshot,
 } from "@avatar-os/runtime";
 import type { PhysicalIntentType } from "@avatar-os/primitives";
-import { avatarService } from "../avatar/avatar-profiles";
+import { avatarService, AVATAR_PROFILES } from "../avatar/avatar-profiles";
 
 interface LogEntry {
   id: number;
@@ -238,6 +238,42 @@ export function DebugConsole() {
         <LiveRow label="Avatar" value={snapshot.avatar.animation ? "playing" : "idle"} />
         <LiveRow label="Body" value={snapshot.avatar.activeAvatarId} />
         <LiveRow label="Mood" value={snapshot.avatar.mood} />
+      </div>
+
+      {/* BODY · 运行时切换（DEV ONLY）：这是 Runtime Test Switch，不是产品功能。
+          只调 avatarService.activate(id) —— 不直接 load GLB / 不替换场景 / 不碰渲染。
+          激活事实在 AvatarService；此处只触发 + 反映当前激活态。
+          严禁被改名成 AvatarPicker / CharacterSelect / SkinShop 等概念。 */}
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(120,160,255,0.12)" }}>
+        <div style={{ color: "#8aa0c8", fontSize: 11, letterSpacing: 0.5, marginBottom: 4 }}>
+          BODY · 运行时切换 (DEV)
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {Object.keys(AVATAR_PROFILES).map((id) => {
+            const isActive = id === snapshot.avatar.activeAvatarId;
+            return (
+              <button
+                key={id}
+                onClick={() => avatarService.activate(id)}
+                title={`activate ${id}`}
+                style={{
+                  background: isActive ? "rgba(120,160,255,0.35)" : "rgba(255,255,255,0.05)",
+                  border: isActive
+                    ? "1px solid rgba(120,160,255,0.85)"
+                    : "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 6,
+                  color: isActive ? "#eaf0ff" : "#c7d2e0",
+                  padding: "4px 8px",
+                  cursor: "pointer",
+                  fontSize: 11,
+                }}
+              >
+                {isActive ? "● " : ""}
+                {id}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* 控制台：输入 + 身体自测（不依赖大脑） */}
