@@ -129,6 +129,10 @@ function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
       const gy = THREE.MathUtils.clamp(gazeBus.y / 8, -1, 1);
       head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, gx * 0.6, 0.12);
       head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, -gy * 0.42, 0.12);
+      // 头部 idle 微摆（歪头/张望）：行为树 headTilt 是"度"，映射为 Z 轴 roll（2D rotate 的 3D 对应）。
+      // 与 gaze 占用的 Y(yaw)/X(pitch) 不同轴 → 互不打架、纯叠加。度→弧度转换。
+      const tiltRad = THREE.MathUtils.degToRad(gazeBus.headTilt ?? 0);
+      head.rotation.z = THREE.MathUtils.lerp(head.rotation.z, tiltRad, 0.12);
     }
   });
 

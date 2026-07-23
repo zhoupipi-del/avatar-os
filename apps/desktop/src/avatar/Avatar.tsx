@@ -346,6 +346,10 @@ export function Avatar() {
         headTilt,
         bodyBob,
       }));
+      // 头部 idle 微摆：把行为树产出的 headTilt(度) 转发给视线总线，
+      // 供 3D 皮肤映射到 head.rotation.z(roll)，与 gaze 占用的 Y/X 轴互不打架。
+      // bodyBob 这版先不接——它和 spine.position.y 呼吸在"上下浮"语义上重叠，留待真机看头部效果后再定。
+      gazeBus.headTilt = headTilt;
     }, 120);
 
     return () => {
