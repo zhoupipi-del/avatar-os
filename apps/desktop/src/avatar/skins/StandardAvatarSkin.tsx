@@ -4,6 +4,7 @@ import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import {
   AnimationManager,
+  BodyChannelAuthority,
   BagCharacterExpression,
   BehaviorVMAdapter,
   EmbodimentRuntime,
@@ -41,6 +42,9 @@ function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
   // 不能直接覆盖 spine.position（会清空绑定姿态原有的非零偏移）。
   const spineBasePosRef = useRef<THREE.Vector3 | null>(null);
   const engineRef = useRef<Engine | null>(null);
+  // Phase 2.2：当前身体的通道占用事实板。AnimationManager 事件 → 本装配层 → Authority。
+  // Phase 2.3：useFrame 中 gaze/headTilt/breathing/expression 四处写入前读取它做门控（见下方 useFrame）。
+  const authorityRef = useRef<BodyChannelAuthority | null>(null);
 
   useEffect(() => {
     const head = findBone(scene, config.headBone);
@@ -67,14 +71,34 @@ function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
         kernelEventBus.emit("AVATAR_THOUGHT", { emoji: "💬", text, kind: "thought", source: "INTENT" }),
     });
 
+    // Phase 2.2：AnimationManager 只发 clip 生命周期事件；本装配层监听后把事实转译给 Authority。
+    // 依赖方向严格遵守：AnimationManager → (event) → 这里 → BodyChannelAuthority，
+    // AnimationManager 全程不认识 Authority / 不认识任何身体通道规则。
+    const authority = new BodyChannelAuthority();
+    authorityRef.current = authority;
+    const ownershipMap = animation.discoverOwnership();
+    let activeClip: string | null = null;
+    const unsubscribe = animation.subscribe((e) => {
+      if (e.type === "started") {
+        // 直接切换（非 finished 中介）时，先清上一个 clip 的占用，避免旧通道泄漏
+        if (activeClip && ownershipMap[activeClip]) authority.clearOwner(ownershipMap[activeClip]);
+        activeClip = e.clip;
+        authority.setOwner(ownershipMap[e.clip] ?? [], "animation");
+      } else {
+        authority.clearOwner(ownershipMap[e.clip] ?? []);
+        if (activeClip === e.clip) activeClip = null;
+      }
+    });
+
     engineRef.current = { animation, expression, bridge };
     bridge.connect();
-    animation.play(config.idleClip); // 默认播 idle
+    animation.play(config.idleClip); // 默认播 idle → 触发 started 事件，Authority 接收占用
 
     // 体检报告：换任意 Mod 模型后，打开 Console 看这里即可知道系统识别到了什么能力
     console.log("[AvatarLoader 🧬] Model Capabilities:", capabilities);
 
     return () => {
+      unsubscribe();
       bridge.disconnect();
       // HMR/重挂载防污染：把 spine.position 还原到本轮记录的绑定姿态基准，
       // 避免下次 useEffect 重跑时 clone() 到"已叠加过呼吸偏移"的脏值，
@@ -82,6 +106,7 @@ function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
       const spine = spineRef.current;
       const basePos = spineBasePosRef.current;
       if (spine && basePos) spine.position.copy(basePos);
+      authorityRef.current = null;
       engineRef.current = null;
     };
   }, [scene, actions, mixer, capabilities, config]);
@@ -107,32 +132,55 @@ function StandardModel({ mood, config }: SkinProps & { config: RigConfig }) {
   }, [mood, scene]);
 
   // 每帧：推进动画混合器 + 推进姿态 lerp + 视线骨骼跟随
+  // Phase 2.3：Expression / Breathing / Gaze / HeadTilt 四处写入前查 Authority 门控，
+  // 动画占用的通道 → 程序层本帧让出（YIELD），让动画完整控制身体；动画未占 → 照常运行（生命感保留）。
+  // 依赖方向：各层只查、不决定；Authority 只存事实。AnimationManager 写入语义未变。
   useFrame((state, delta) => {
     const engine = engineRef.current;
     if (!engine) return;
-    engine.animation.tick(delta);
-    engine.expression.update(delta);
+    const authority = authorityRef.current;
 
-    // 待机呼吸：只碰 position，绝不碰 spine.rotation
-    //（BagCharacterExpression.update 每帧硬覆盖 rotation，写了也会被吃掉）。
-    // 在 expression.update 之后写，确保这帧最终生效的是"表情姿态 + 呼吸偏移"，
-    // 而不是被表情覆盖掉。
+    engine.animation.tick(delta);
+
+    // Expression：声明通道 Spine.rotation；动画占用该通道时让出，保留动画躯干姿态
     const spine = spineRef.current;
+    if (
+      spine &&
+      (!authority || authority.canWrite({ bone: spine.name, property: "rotation" }, "expression") === "ALLOW")
+    ) {
+      engine.expression.update(delta);
+    }
+
+    // 待机呼吸：声明通道 Spine.position；动画占用该通道时整段让出 ——
+    // ⚠️ 绝不回写 basePos，否则会把动画的脊柱位移覆盖掉（这是之前 Phase 1.5 发现的隐藏 bug）。
     const basePos = spineBasePosRef.current;
-    if (spine && basePos) {
+    if (
+      spine &&
+      basePos &&
+      (!authority || authority.canWrite({ bone: spine.name, property: "position" }, "breathing") === "ALLOW")
+    ) {
       spine.position.y = basePos.y + breathingOffset(state.clock.elapsedTime);
     }
 
     const head = headRef.current;
     if (head) {
-      const gx = THREE.MathUtils.clamp(gazeBus.x / 8, -1, 1);
-      const gy = THREE.MathUtils.clamp(gazeBus.y / 8, -1, 1);
-      head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, gx * 0.6, 0.12);
-      head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, -gy * 0.42, 0.12);
-      // 头部 idle 微摆（歪头/张望）：行为树 headTilt 是"度"，映射为 Z 轴 roll（2D rotate 的 3D 对应）。
-      // 与 gaze 占用的 Y(yaw)/X(pitch) 不同轴 → 互不打架、纯叠加。度→弧度转换。
-      const tiltRad = THREE.MathUtils.degToRad(gazeBus.headTilt ?? 0);
-      head.rotation.z = THREE.MathUtils.lerp(head.rotation.z, tiltRad, 0.12);
+      // 视线跟随：声明通道 Head.rotation（含 X/Y 轴）；动画占 Head.rotation 时让出转头，保留动画头部动作
+      const gazeAllowed =
+        !authority || authority.canWrite({ bone: head.name, property: "rotation" }, "gaze") === "ALLOW";
+      if (gazeAllowed) {
+        const gx = THREE.MathUtils.clamp(gazeBus.x / 8, -1, 1);
+        const gy = THREE.MathUtils.clamp(gazeBus.y / 8, -1, 1);
+        head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, gx * 0.6, 0.12);
+        head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, -gy * 0.42, 0.12);
+      }
+      // 头部 idle 微摆（Z 轴 roll）：声明通道同为 Head.rotation；动画占 Head.rotation 时一并让出
+      // （按 BOSS 决策：Gaze 与 HeadTilt 共享 Head.rotation 决策，是主动选择，不是遗漏）
+      const tiltAllowed =
+        !authority || authority.canWrite({ bone: head.name, property: "rotation" }, "headTilt") === "ALLOW";
+      if (tiltAllowed) {
+        const tiltRad = THREE.MathUtils.degToRad(gazeBus.headTilt ?? 0);
+        head.rotation.z = THREE.MathUtils.lerp(head.rotation.z, tiltRad, 0.12);
+      }
     }
   });
 

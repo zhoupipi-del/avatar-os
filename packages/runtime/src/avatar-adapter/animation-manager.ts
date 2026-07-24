@@ -1,6 +1,13 @@
 import * as THREE from "three";
 import { buildAnimationOwnershipMap, type AnimationOwnershipMap } from "./animation-channel-scanner";
 
+/** v0.3.4-B+ Phase 2.2：Animation 生命周期事件。AnimationManager 只负责「发生了什么」，不认识 Authority。 */
+export type AnimationEvent = {
+  type: "started" | "finished";
+  /** 触发事件的 clip 原名（如 "NlaTrack.002"） */
+  clip: string;
+};
+
 export interface AnimationManagerOptions {
   /** 默认循环片段（Idle/待机），playOnce 播完自动回它 */
   idleClip: string;
@@ -25,6 +32,8 @@ export class AnimationManager {
   private active: THREE.AnimationAction | null = null;
   private idleClip: string;
   private fade: number;
+  /** Phase 2.2：clip 生命周期事件订阅者（AnimationManager 不认识 Authority，只广播事件） */
+  private listeners = new Set<(e: AnimationEvent) => void>();
 
   constructor(
     mixer: THREE.AnimationMixer,
@@ -42,6 +51,23 @@ export class AnimationManager {
     }
   }
 
+  /**
+   * Phase 2.2：订阅 clip 生命周期事件（started / finished）。
+   * 返回取消订阅函数。AnimationManager 不持有 Authority —— 调用方（Runtime 装配层）
+   * 负责把事件转译为 Authority.setOwner / clearOwner。
+   */
+  public subscribe(listener: (e: AnimationEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** 广播一个生命周期事件给所有订阅者（无订阅者时为空操作） */
+  private emit(event: AnimationEvent): void {
+    for (const listener of this.listeners) listener(event);
+  }
+
   /** 是否存在某片段（大小写不敏感） */
   public has(name: string): boolean {
     return this.actions.has(name) || this.actions.has(name.toLowerCase());
@@ -54,6 +80,8 @@ export class AnimationManager {
     action.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(this.fade).play();
     if (this.active && this.active !== action) this.active.fadeOut(this.fade);
     this.active = action;
+    const clip = action.getClip();
+    if (clip) this.emit({ type: "started", clip: clip.name });
   }
 
   /** 单次播放（意图/状态触发的一次性动作），播完平滑回 idle */
@@ -63,10 +91,14 @@ export class AnimationManager {
     if (this.active && this.active !== action) this.active.fadeOut(this.fade);
     action.reset().setLoop(THREE.LoopOnce, 1).fadeIn(this.fade).play();
     this.active = action;
+    const clip = action.getClip();
+    if (clip) this.emit({ type: "started", clip: clip.name });
 
     const mixer = this.mixer;
+    const finishedClip = clip ? clip.name : name;
     const done = () => {
       mixer.removeEventListener("finished", done);
+      this.emit({ type: "finished", clip: finishedClip });
       this.play(this.idleClip);
       onFinished?.();
     };
