@@ -16,6 +16,7 @@
 import type { LifePhase } from "./life/life-phase";
 import type { AutonomousSchedulerState } from "./life/autonomous-scheduler";
 import type { PersonalityProfileId, PersonalityTraits, AutonomousBehaviorTuning } from "./personality/behavior-tuning";
+import type { EmotionState } from "./emotion/emotion-state";
 
 export interface AgentRuntimeSnapshot {
   cognition: {
@@ -60,6 +61,8 @@ export interface AgentRuntimeSnapshot {
     traits: PersonalityTraits;
     tuning: AutonomousBehaviorTuning;
   } | null;
+  /** 当前情绪状态（来源：EMOTION_STATE_CHANGED.state）。每 tick 由 life-loop 驱动后写入，绝不轮询。 */
+  emotion: EmotionState | null;
   /** 最近一次留痕的时间戳（ms） */
   timestamp: number;
 }
@@ -73,6 +76,7 @@ export function createInitialSnapshot(): AgentRuntimeSnapshot {
     life: { phase: null },
     autonomous: null,
     personality: null,
+    emotion: null,
     timestamp: 0,
   };
 }
@@ -143,4 +147,13 @@ export function recordPersonality(
   p: { profileId: PersonalityProfileId | null; traits: PersonalityTraits; tuning: AutonomousBehaviorTuning },
 ): AgentRuntimeSnapshot {
   return { ...s, personality: p, timestamp: Date.now() };
+}
+
+/**
+ * 记录当前情绪状态（来源：EMOTION_STATE_CHANGED.state）。
+ * 纯函数式写入，与其它 recordX 同构；每 tick 由 life-loop 驱动 EmotionEngine 后广播写入，绝不轮询。
+ * 情绪本身不在此发意图——它只反映内部状态，由 life-loop 读取后经人格调制影响行为。
+ */
+export function recordEmotion(s: AgentRuntimeSnapshot, state: EmotionState): AgentRuntimeSnapshot {
+  return { ...s, emotion: state, timestamp: Date.now() };
 }

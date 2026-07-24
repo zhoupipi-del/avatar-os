@@ -27,11 +27,13 @@ import {
   recordAvatarProfile,
   recordAutonomous,
   recordPersonality,
+  recordEmotion,
   requestPersonalityProfile,
   BUILTIN_PERSONALITY_PROFILES,
   DEFAULT_PERSONALITY_PROFILE_ID,
   type AgentRuntimeSnapshot,
   type AutonomousBehaviorTuning,
+  type EmotionState,
 } from "@avatar-os/runtime";
 import type { PhysicalIntentType } from "@avatar-os/primitives";
 import { avatarService, AVATAR_PROFILES } from "../avatar/avatar-profiles";
@@ -176,6 +178,11 @@ export function DebugConsole() {
       setSnapshot((s) => recordPersonality(s, { profileId: p.profileId, traits: p.traits, tuning: p.tuning }));
     });
 
+    // —— 情绪（v0.3.6-C）：EMOTION_STATE_CHANGED → 只读镜像进快照 ——
+    const uEmotion = kernelEventBus.on("EMOTION_STATE_CHANGED", (p: { state: EmotionState }) => {
+      setSnapshot((s) => recordEmotion(s, p.state));
+    });
+
     // —— 输入 / 记忆：仅入日志，不进 LIVE STATE（它们是"发生了什么"，不是"当前状态"）——
     const uInput = kernelEventBus.on("SPEECH_INPUT", (p) => {
       pushLog("INPUT", `「${p.text}」`);
@@ -195,6 +202,7 @@ export function DebugConsole() {
       uAvatar();
       uAuto();
       uPersonality();
+      uEmotion();
       uInput();
       uMemory();
     };
@@ -293,6 +301,10 @@ export function DebugConsole() {
         <LiveRow label="Independence" value={snapshot.personality ? String(snapshot.personality.traits.independence) : null} />
         <LiveRow label="Expressiveness" value={snapshot.personality ? String(snapshot.personality.traits.expressiveness) : null} />
         <LiveRow label="Behavior Tuning" value={fmtTuning(snapshot.personality?.tuning ?? null)} />
+        <LiveRow label="Emotion Comfort" value={snapshot.emotion ? snapshot.emotion.comfort.toFixed(2) : null} />
+        <LiveRow label="Emotion Trust" value={snapshot.emotion ? snapshot.emotion.trust.toFixed(2) : null} />
+        <LiveRow label="Emotion Loneliness" value={snapshot.emotion ? snapshot.emotion.loneliness.toFixed(2) : null} />
+        <LiveRow label="Emotion Curiosity" value={snapshot.emotion ? snapshot.emotion.curiosity.toFixed(2) : null} />
       </div>
 
       {/* BODY · 运行时切换（DEV ONLY）：这是 Runtime Test Switch，不是产品功能。

@@ -2,6 +2,7 @@ import { Mood, PhysicalIntent } from "@avatar-os/primitives";
 import type { LifePhase } from "./life/life-phase";
 import type { AutonomousSchedulerState } from "./life/autonomous-scheduler";
 import type { PersonalityTraits, PersonalityProfileId, AutonomousBehaviorTuning } from "./personality/behavior-tuning";
+import type { EmotionState } from "./emotion/emotion-state";
 
 export type KernelEventType =
   | "SENSOR_MOUSE_MOVE"
@@ -22,7 +23,8 @@ export type KernelEventType =
   | "AUTONOMOUS_BEHAVIOR_CHANGED"
   | "ANIMATION_CLIP_STATE"
   | "PERSONALITY_PROFILE_REQUEST"
-  | "PERSONALITY_PROFILE_CHANGED";
+  | "PERSONALITY_PROFILE_CHANGED"
+  | "EMOTION_STATE_CHANGED";
 
 export interface KernelEventPayloads {
   SENSOR_MOUSE_MOVE: { x: number; y: number };
@@ -96,6 +98,12 @@ export interface KernelEventPayloads {
    * profileId 为匹配到的内置 Profile id，自定 traits 时为 null。
    */
   PERSONALITY_PROFILE_CHANGED: { profileId: PersonalityProfileId | null; traits: PersonalityTraits; tuning: AutonomousBehaviorTuning };
+  /**
+   * 情绪状态变化（v0.3.6-C）：life-loop 每 tick 驱动 EmotionEngine 后广播，
+   * 供 Runtime Snapshot / DebugConsole 观测。情绪本身永不发意图——它只改变内部状态，
+   * 由 life-loop 读取后经 applyEmotionToTraits → 调度器那条既有发射口影响行为。
+   */
+  EMOTION_STATE_CHANGED: { state: EmotionState };
 }
 
 type EventCallback<T> = (payload: T) => void;

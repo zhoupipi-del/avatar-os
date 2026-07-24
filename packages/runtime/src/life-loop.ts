@@ -28,6 +28,12 @@ import {
   DEFAULT_PERSONALITY_PROFILE_ID,
   type PersonalityTraits,
 } from "./personality/behavior-tuning";
+import { EmotionEngine } from "./emotion/emotion-engine";
+import {
+  createInitialEmotion,
+  applyEmotionToTraits,
+  type EmotionState,
+} from "./emotion/emotion-state";
 
 export interface LifeLoopDeps {
   /** 每 tick 采样真实在场信号（O1 修复入口） */
@@ -52,6 +58,10 @@ export class LifeLoop {
   private unbindInteraction: (() => void) | null = null;
   private unbindClip: (() => void) | null = null;
   private unbindPersonality: (() => void) | null = null;
+  /** 情绪引擎（v0.3.6-C）：维护经历后的内部状态，只为行为调制提供输入，永不发意图。 */
+  private readonly emotion = new EmotionEngine(createInitialEmotion());
+  /** 当前生效的人格 traits（驱动调度器调音的基线；情绪在此之上做偏移，中性情绪→恒等）。 */
+  private schedulerTraits: PersonalityTraits = BUILTIN_PERSONALITY_PROFILES[DEFAULT_PERSONALITY_PROFILE_ID];
   /** 离散生命阶段机（v0.3.5-A）：统一替代零散 IDLE_BREATHE/LOOK_AT_USER 发射 */
   private readonly phaseMachine = new LifePhaseMachine("awake");
   /** 自主行为调度器（v0.3.6-A）：收编原 PresenceEngine 的泊松节律，成为自主动作唯一发射口。
@@ -83,7 +93,12 @@ export class LifeLoop {
       this.morphology.setIntent(intent);
       this.lastIntentType = intent.type;
       this.deps.interactionLogger?.(intent);
-      if (intent.type === "BOUNCE_HAPPY") this.lastInteractionAt = Date.now();
+      if (intent.type === "BOUNCE_HAPPY") {
+        this.lastInteractionAt = Date.now();
+        // 用户主动触碰（"摸摸它"）→ 情绪正向反馈：comfort/trust↑、loneliness↓（v0.3.6-C）。
+        this.emotion.applyInteraction("touch");
+        this.syncEmotion();
+      }
       // 用户/外部意图立即打断自主行为，进入静默窗口（v0.3.6-A 调度规则：用户行为优先级 > 自主行为）。
       // 来源识别（窄修复，不重开链路）：
       //   AI     = LLM 回复 / DebugConsole 身体自测 / Agent 提议（说话走此源）
@@ -103,10 +118,12 @@ export class LifeLoop {
     // 这里收口——套用调音到调度器并广播 CHANGED，保证调度器不被任何 UI 直接触碰。
     this.unbindPersonality = kernelEventBus.on("PERSONALITY_PROFILE_REQUEST", ({ traits }) => {
       const t = clampTraits(traits);
-      this.scheduler.setPersonalityProfile(t);
+      this.schedulerTraits = t;
       const tuning = deriveBehaviorTuning(t);
       const profileId = resolveProfileId(t);
       kernelEventBus.emit("PERSONALITY_PROFILE_CHANGED", { profileId, traits: t, tuning });
+      // 人格基线变了，重算"人格+情绪"共同调制的有效调音（情绪状态保留，不重置）。
+      this.syncEmotion();
     });
 
     // 初始广播默认人格：让 Runtime Snapshot / DebugConsole 立即可见（调度器默认即中性=该 Profile）。
@@ -119,11 +136,17 @@ export class LifeLoop {
       });
     }
 
+    // 初始广播情绪（v0.3.6-C）：初始中性情绪 → 对人格零偏移，行为与 v0.3.6-B 一致。
+    this.syncEmotion();
+
     // 实质互动信号：说话 → 刷新 lastInteractionAt（驱动 active 阶段）。
     // 注意：SENSOR_MOUSE_NEAR（光标靠近）只算"在场/好奇"，不算"互动"，
     // 避免把"移鼠标→curious"错判成 active —— curious 由 userActive 驱动。
     const markInteraction = () => {
       this.lastInteractionAt = Date.now();
+      // 用户说话 → 情绪正向反馈：trust↑、comfort↑、loneliness↓（v0.3.6-C）。
+      this.emotion.applyInteraction("speak");
+      this.syncEmotion();
     };
     const uInput = kernelEventBus.on("SPEECH_INPUT", markInteraction);
     this.unbindInteraction = () => {
@@ -185,8 +208,24 @@ export class LifeLoop {
     // 持续型默认意图(呼吸/注视/打盹)与一次性自主动作(STRETCH/PEEK/LONELY_WAIT)均由它统一派发，
     // 经冷却/全局间隔/用户打断/剪辑占用全部闸门管制——根除"意图风暴"。
     // 仅状态有变化时返回快照，广播 AUTONOMOUS_BEHAVIOR_CHANGED 供 Runtime Snapshot / DebugConsole 观测。
+    const userPresent = presence.focusState !== "AWAY";
+    const prevBehavior = this.scheduler.getState().behavior;
     const schedState = this.scheduler.tick(this.phaseMachine.phase, nowMs, this.lastIntentType);
     if (schedState) kernelEventBus.emit("AUTONOMOUS_BEHAVIOR_CHANGED", { state: schedState });
+
+    // 自主动作起始边沿 → 情绪反馈（v0.3.6-C）：只调制内部状态，绝不绕过调度器。
+    // 一次 one-shot 真正发射（behavior 由 null 变为某 id）时：偷看/伸展=主动观察→curiosity 满足；
+    // 看向用户且用户在场=完成互动→trust↑。情绪变化随后经 syncEmotion 回到人格调制链路。
+    if (prevBehavior == null) {
+      const cur = this.scheduler.getState().behavior;
+      if (cur != null) {
+        this.emotion.applyAutonomous(cur === "lonely-wait" && userPresent ? "interact" : "observe");
+      }
+    }
+
+    // 时间流逝推进情绪 + 把"人格+情绪"共同调制后的有效调音回写调度器并广播（v0.3.6-C）。
+    this.emotion.tick(this.tickMs, userPresent);
+    this.syncEmotion();
 
     // 4. Morphology：意图+状态 → 渲染参数
     const params = this.morphology.render(state, emotionalState);
@@ -196,6 +235,18 @@ export class LifeLoop {
       bodyScale: params.bodyScale,
       gazeBias: params.gazeBias,
     });
+  }
+
+  /**
+   * 情绪 → 行为 同步（v0.3.6-C）：把"当前人格基线 + 当前情绪"共同派生出有效调音，回写调度器，
+   * 并广播 EMOTION_STATE_CHANGED。铁律：情绪永不发意图——它只改变调度器行为表的参数，
+   * 由 AutonomousScheduler 那条既有的唯一发射口最终决定动作。中性情绪 → 对人格零偏移（恒等）。
+   */
+  private syncEmotion(): void {
+    const e = this.emotion.getState();
+    const effective = applyEmotionToTraits(this.schedulerTraits, e);
+    this.scheduler.setPersonalityProfile(effective);
+    kernelEventBus.emit("EMOTION_STATE_CHANGED", { state: e });
   }
 }
 
