@@ -2,6 +2,7 @@ export * from "./event-bus";
 export * from "./avatar-fsm";
 export * from "./drive-engine";
 export * from "./personality";
+export * from "./personality/behavior-tuning";
 export * from "./behavior-vm";
 export * from "./behavior-rules";
 export * from "./behavior/vm";

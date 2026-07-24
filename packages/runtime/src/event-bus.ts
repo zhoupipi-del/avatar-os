@@ -1,6 +1,7 @@
 import { Mood, PhysicalIntent } from "@avatar-os/primitives";
 import type { LifePhase } from "./life/life-phase";
 import type { AutonomousSchedulerState } from "./life/autonomous-scheduler";
+import type { PersonalityTraits, PersonalityProfileId, AutonomousBehaviorTuning } from "./personality/behavior-tuning";
 
 export type KernelEventType =
   | "SENSOR_MOUSE_MOVE"
@@ -19,7 +20,9 @@ export type KernelEventType =
   | "AVATAR_PRIMITIVE"
   | "LIFE_PHASE_CHANGED"
   | "AUTONOMOUS_BEHAVIOR_CHANGED"
-  | "ANIMATION_CLIP_STATE";
+  | "ANIMATION_CLIP_STATE"
+  | "PERSONALITY_PROFILE_REQUEST"
+  | "PERSONALITY_PROFILE_CHANGED";
 
 export interface KernelEventPayloads {
   SENSOR_MOUSE_MOVE: { x: number; y: number };
@@ -83,6 +86,16 @@ export interface KernelEventPayloads {
   /** 显式动画片段播放状态（v0.3.6-A）：由 AnimationManager.playOnce 生命周期驱动，
    *  供调度器得知"身体正忙"从而不插入自主动作。idle 循环片段(play)不广播此事件。 */
   ANIMATION_CLIP_STATE: { playing: boolean; clip: string };
+  /**
+   * 人格切换请求（v0.3.6-B）：唯一对外入口，由 DebugConsole dev-only 切换器发出。
+   * life-loop 订阅后转交调度器，再广播 CHANGED——保证调度器不被任何 UI 直接触碰。
+   */
+  PERSONALITY_PROFILE_REQUEST: { traits: PersonalityTraits };
+  /**
+   * 人格已生效（v0.3.6-B）：life-loop 套用调音后广播，供 Runtime Snapshot / DebugConsole 观测。
+   * profileId 为匹配到的内置 Profile id，自定 traits 时为 null。
+   */
+  PERSONALITY_PROFILE_CHANGED: { profileId: PersonalityProfileId | null; traits: PersonalityTraits; tuning: AutonomousBehaviorTuning };
 }
 
 type EventCallback<T> = (payload: T) => void;

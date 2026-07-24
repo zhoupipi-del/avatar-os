@@ -26,7 +26,12 @@ import {
   recordLifePhase,
   recordAvatarProfile,
   recordAutonomous,
+  recordPersonality,
+  requestPersonalityProfile,
+  BUILTIN_PERSONALITY_PROFILES,
+  DEFAULT_PERSONALITY_PROFILE_ID,
   type AgentRuntimeSnapshot,
+  type AutonomousBehaviorTuning,
 } from "@avatar-os/runtime";
 import type { PhysicalIntentType } from "@avatar-os/primitives";
 import { avatarService, AVATAR_PROFILES } from "../avatar/avatar-profiles";
@@ -80,6 +85,17 @@ function LiveRow({ label, value }: { label: string; value: string | null }) {
 /** 把 epoch ms 格式化为本地时钟串；null 返回 null（LiveRow 会显示破折号）。 */
 function fmtClock(ms: number | null | undefined): string | null {
   return ms == null ? null : new Date(ms).toLocaleTimeString();
+}
+
+/** 把行为调音乘子压成一行可读串（PK/ST/LL = 概率/冷却乘子；UF = 面向用户权重）。 */
+function fmtTuning(t: AutonomousBehaviorTuning | null): string | null {
+  if (!t) return null;
+  const r = (x: number) => x.toFixed(2);
+  return `PK ${r(t.peekChanceMultiplier)}/${r(t.peekCooldownMultiplier)} · ST ${r(
+    t.stretchChanceMultiplier,
+  )}/${r(t.stretchCooldownMultiplier)} · LL ${r(t.lonelyLookChanceMultiplier)}/${r(
+    t.lonelyLookCooldownMultiplier,
+  )} · UF ${r(t.userFocusWeight)}`;
 }
 
 export function DebugConsole() {
@@ -155,6 +171,11 @@ export function DebugConsole() {
       setSnapshot((snap) => recordAutonomous(snap, p.state));
     });
 
+    // —— 人格（v0.3.6-B）：PERSONALITY_PROFILE_CHANGED → 只读镜像进快照 ——
+    const uPersonality = kernelEventBus.on("PERSONALITY_PROFILE_CHANGED", (p) => {
+      setSnapshot((s) => recordPersonality(s, { profileId: p.profileId, traits: p.traits, tuning: p.tuning }));
+    });
+
     // —— 输入 / 记忆：仅入日志，不进 LIVE STATE（它们是"发生了什么"，不是"当前状态"）——
     const uInput = kernelEventBus.on("SPEECH_INPUT", (p) => {
       pushLog("INPUT", `「${p.text}」`);
@@ -173,6 +194,7 @@ export function DebugConsole() {
       uPhase();
       uAvatar();
       uAuto();
+      uPersonality();
       uInput();
       uMemory();
     };
@@ -264,6 +286,13 @@ export function DebugConsole() {
         <LiveRow label="Auto Started" value={fmtClock(snapshot.autonomous?.startedAt)} />
         <LiveRow label="Auto Cooldown" value={fmtClock(snapshot.autonomous?.cooldownUntil)} />
         <LiveRow label="Auto Interrupted" value={snapshot.autonomous?.interruptedBy ?? null} />
+        <LiveRow label="Profile" value={snapshot.personality?.profileId ?? null} />
+        <LiveRow label="Curiosity" value={snapshot.personality ? String(snapshot.personality.traits.curiosity) : null} />
+        <LiveRow label="Sociability" value={snapshot.personality ? String(snapshot.personality.traits.sociability) : null} />
+        <LiveRow label="Patience" value={snapshot.personality ? String(snapshot.personality.traits.patience) : null} />
+        <LiveRow label="Independence" value={snapshot.personality ? String(snapshot.personality.traits.independence) : null} />
+        <LiveRow label="Expressiveness" value={snapshot.personality ? String(snapshot.personality.traits.expressiveness) : null} />
+        <LiveRow label="Behavior Tuning" value={fmtTuning(snapshot.personality?.tuning ?? null)} />
       </div>
 
       {/* BODY · 运行时切换（DEV ONLY）：这是 Runtime Test Switch，不是产品功能。
@@ -299,6 +328,43 @@ export function DebugConsole() {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* PERSONALITY · 运行时切换 (DEV ONLY)：这是 Runtime Test Switch，不是产品功能。
+          只调 requestPersonalityProfile(id) —— 不直接触调度器内部，与身体切换同理（只触发、不拥有）。
+          人格只"调音"，不绕过调度器发意图；安全边界由 applyTuning 底线夹紧保证。 */}
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(120,160,255,0.12)" }}>
+        <div style={{ color: "#8aa0c8", fontSize: 11, letterSpacing: 0.5, marginBottom: 4 }}>
+          PERSONALITY · 运行时切换 (DEV)
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {(Object.keys(BUILTIN_PERSONALITY_PROFILES) as Array<keyof typeof BUILTIN_PERSONALITY_PROFILES>).map(
+            (id) => {
+              const isActive = id === (snapshot.personality?.profileId ?? DEFAULT_PERSONALITY_PROFILE_ID);
+              return (
+                <button
+                  key={id}
+                  onClick={() => requestPersonalityProfile(BUILTIN_PERSONALITY_PROFILES[id])}
+                  title={`set personality ${id}`}
+                  style={{
+                    background: isActive ? "rgba(120,160,255,0.35)" : "rgba(255,255,255,0.05)",
+                    border: isActive
+                      ? "1px solid rgba(120,160,255,0.85)"
+                      : "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 6,
+                    color: isActive ? "#eaf0ff" : "#c7d2e0",
+                    padding: "4px 8px",
+                    cursor: "pointer",
+                    fontSize: 11,
+                  }}
+                >
+                  {isActive ? "● " : ""}
+                  {id}
+                </button>
+              );
+            },
+          )}
         </div>
       </div>
 

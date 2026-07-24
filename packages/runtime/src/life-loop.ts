@@ -20,6 +20,14 @@ import { behaviorVM } from "./behavior-vm";
 import { LifePhaseMachine, type LifePhaseSignals, INTERACTION_WINDOW_MS } from "./life/life-phase";
 import { AutonomousScheduler } from "./life/autonomous-scheduler";
 import { PersonalityVector, DEFAULT_PERSONALITY } from "./personality";
+import {
+  clampTraits,
+  deriveBehaviorTuning,
+  resolveProfileId,
+  BUILTIN_PERSONALITY_PROFILES,
+  DEFAULT_PERSONALITY_PROFILE_ID,
+  type PersonalityTraits,
+} from "./personality/behavior-tuning";
 
 export interface LifeLoopDeps {
   /** 每 tick 采样真实在场信号（O1 修复入口） */
@@ -43,6 +51,7 @@ export class LifeLoop {
   private unbindIntent: (() => void) | null = null;
   private unbindInteraction: (() => void) | null = null;
   private unbindClip: (() => void) | null = null;
+  private unbindPersonality: (() => void) | null = null;
   /** 离散生命阶段机（v0.3.5-A）：统一替代零散 IDLE_BREATHE/LOOK_AT_USER 发射 */
   private readonly phaseMachine = new LifePhaseMachine("awake");
   /** 自主行为调度器（v0.3.6-A）：收编原 PresenceEngine 的泊松节律，成为自主动作唯一发射口。
@@ -90,6 +99,26 @@ export class LifeLoop {
       this.scheduler.notifyClipPlayback(p.playing);
     });
 
+    // 人格切换请求（v0.3.6-B）：唯一对外入口，由 DebugConsole dev-only 切换器发出。
+    // 这里收口——套用调音到调度器并广播 CHANGED，保证调度器不被任何 UI 直接触碰。
+    this.unbindPersonality = kernelEventBus.on("PERSONALITY_PROFILE_REQUEST", ({ traits }) => {
+      const t = clampTraits(traits);
+      this.scheduler.setPersonalityProfile(t);
+      const tuning = deriveBehaviorTuning(t);
+      const profileId = resolveProfileId(t);
+      kernelEventBus.emit("PERSONALITY_PROFILE_CHANGED", { profileId, traits: t, tuning });
+    });
+
+    // 初始广播默认人格：让 Runtime Snapshot / DebugConsole 立即可见（调度器默认即中性=该 Profile）。
+    {
+      const t = BUILTIN_PERSONALITY_PROFILES[DEFAULT_PERSONALITY_PROFILE_ID];
+      kernelEventBus.emit("PERSONALITY_PROFILE_CHANGED", {
+        profileId: DEFAULT_PERSONALITY_PROFILE_ID,
+        traits: t,
+        tuning: deriveBehaviorTuning(t),
+      });
+    }
+
     // 实质互动信号：说话 → 刷新 lastInteractionAt（驱动 active 阶段）。
     // 注意：SENSOR_MOUSE_NEAR（光标靠近）只算"在场/好奇"，不算"互动"，
     // 避免把"移鼠标→curious"错判成 active —— curious 由 userActive 驱动。
@@ -115,6 +144,8 @@ export class LifeLoop {
     this.unbindInteraction = null;
     this.unbindClip?.();
     this.unbindClip = null;
+    this.unbindPersonality?.();
+    this.unbindPersonality = null;
   }
 
   private tick(): void {
@@ -166,4 +197,12 @@ export class LifeLoop {
       gazeBias: params.gazeBias,
     });
   }
+}
+
+/**
+ * 唯一对外人格切换入口（v0.3.6-B）。发 REQUEST 事件，由 LifeLoop 收口套用调音并广播 CHANGED。
+ * DebugConsole/BODY 切换器只调这一个函数——绝不触碰调度器内部，与身体切换同理（只触发、不拥有）。
+ */
+export function requestPersonalityProfile(traits: PersonalityTraits): void {
+  kernelEventBus.emit("PERSONALITY_PROFILE_REQUEST", { traits });
 }

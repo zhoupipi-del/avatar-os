@@ -26,6 +26,13 @@
 
 import type { PhysicalIntentType } from "@avatar-os/primitives";
 import { phaseDefaultIntent, type LifePhase } from "./life-phase";
+import {
+  applyTuning,
+  clampTraits,
+  deriveBehaviorTuning,
+  NEUTRAL_TRAITS,
+  type PersonalityTraits,
+} from "../personality/behavior-tuning";
 
 /** 一条自主行为定义（数据驱动：调频率/加行为只改表，不改逻辑） */
 export interface AutonomousBehaviorDef {
@@ -119,14 +126,19 @@ export interface AutonomousSchedulerOptions {
   emit: (payload: AutonomousEmitPayload) => void;
   /** 随机数源，缺省 Math.random；单测注入常量使调度确定性 */
   rng?: () => number;
-  /** 行为表，缺省 DEFAULT_AUTONOMOUS_BEHAVIORS */
+  /** 行为表，缺省由人格派生(中性=冻结基线) */
   behaviors?: readonly AutonomousBehaviorDef[];
+  /**
+   * 人格特征：缺省中性(= v0.3.6-A 冻结参数)。
+   * 与 behaviors 互斥——显式传 behaviors 时人格不生效(单测用)。
+   */
+  personality?: PersonalityTraits;
 }
 
 export class AutonomousScheduler {
   private readonly emit: (payload: AutonomousEmitPayload) => void;
   private readonly rng: () => number;
-  private readonly behaviors: readonly AutonomousBehaviorDef[];
+  private behaviors: readonly AutonomousBehaviorDef[];
 
   private lastPhase: LifePhase | null = null;
   private lastUserIntentAt = -Infinity;
@@ -147,7 +159,18 @@ export class AutonomousScheduler {
   constructor(opts: AutonomousSchedulerOptions) {
     this.emit = opts.emit;
     this.rng = opts.rng ?? Math.random;
-    this.behaviors = opts.behaviors ?? DEFAULT_AUTONOMOUS_BEHAVIORS;
+    this.behaviors =
+      opts.behaviors ??
+      applyTuning(DEFAULT_AUTONOMOUS_BEHAVIORS, deriveBehaviorTuning(clampTraits(opts.personality ?? NEUTRAL_TRAITS)));
+  }
+
+  /**
+   * 运行时切换人格：重新派生有效行为表。
+   * 只"调音"——替换行为表，绝不绕过调度器直接发意图。
+   * 不触碰 lastFiredAt / 静默窗 / 进行中行为等运行态（行为 id 不变，冷却累计连续）。
+   */
+  public setPersonalityProfile(traits: PersonalityTraits): void {
+    this.behaviors = applyTuning(DEFAULT_AUTONOMOUS_BEHAVIORS, deriveBehaviorTuning(clampTraits(traits)));
   }
 
   /** 只读可观测快照 */

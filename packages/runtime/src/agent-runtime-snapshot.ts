@@ -15,6 +15,7 @@
 
 import type { LifePhase } from "./life/life-phase";
 import type { AutonomousSchedulerState } from "./life/autonomous-scheduler";
+import type { PersonalityProfileId, PersonalityTraits, AutonomousBehaviorTuning } from "./personality/behavior-tuning";
 
 export interface AgentRuntimeSnapshot {
   cognition: {
@@ -53,6 +54,12 @@ export interface AgentRuntimeSnapshot {
   };
   /** 自主行为调度器状态（来源：AUTONOMOUS_BEHAVIOR_CHANGED.state）。出问题不再靠猜。 */
   autonomous: AutonomousSchedulerState | null;
+  /** 当前生效人格（来源：PERSONALITY_PROFILE_CHANGED）。仅人格切换时写入，绝不轮询。 */
+  personality: {
+    profileId: PersonalityProfileId | null;
+    traits: PersonalityTraits;
+    tuning: AutonomousBehaviorTuning;
+  } | null;
   /** 最近一次留痕的时间戳（ms） */
   timestamp: number;
 }
@@ -65,6 +72,7 @@ export function createInitialSnapshot(): AgentRuntimeSnapshot {
     avatar: { animation: null, mood: null, activeAvatarId: null },
     life: { phase: null },
     autonomous: null,
+    personality: null,
     timestamp: 0,
   };
 }
@@ -124,4 +132,15 @@ export function recordAutonomous(
   state: AutonomousSchedulerState,
 ): AgentRuntimeSnapshot {
   return { ...s, autonomous: state, timestamp: Date.now() };
+}
+
+/**
+ * 记录当前生效人格（来源：PERSONALITY_PROFILE_CHANGED）。
+ * 纯函数式写入，与其它 recordX 同构；仅人格切换时由 life-loop 广播写入，绝不轮询。
+ */
+export function recordPersonality(
+  s: AgentRuntimeSnapshot,
+  p: { profileId: PersonalityProfileId | null; traits: PersonalityTraits; tuning: AutonomousBehaviorTuning },
+): AgentRuntimeSnapshot {
+  return { ...s, personality: p, timestamp: Date.now() };
 }
