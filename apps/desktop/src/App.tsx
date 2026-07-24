@@ -18,6 +18,7 @@ import { createCognitionDriver } from "./cognition/cognitionDriver";
 import { DebugConsole } from "./debug/DebugConsole";
 import { AnimationInspector } from "./avatar/skins/AnimationInspector";
 import { avatarService, attachAvatarPersistence, IN_MEMORY_AVATAR_STORAGE } from "./avatar/avatar-profiles";
+import { createTauriRelationshipRepository, attachRelationshipCloseHandler } from "./persistence/tauri-relationship-repository";
 
 const DRIVE_TICK_MS = 1000;
 
@@ -48,6 +49,13 @@ export default function App() {
 
       // 生命闭环：单一 1000ms 心跳。v0.3.6-A——自主行为节律收编进 LifeLoop 内的
       // AutonomousScheduler（阶段感知 + 冷却/打断/去重），不再依赖外部 PresenceEngine。
+      // v0.3.7-A——注入关系持久化仓储（Tauri 单真相源；纯内存降级为 null 时不持久化）。
+      const relationshipRepository = createTauriRelationshipRepository();
+      try {
+        attachRelationshipCloseHandler(relationshipRepository);
+      } catch {
+        // 非 Tauri 上下文（如纯 Vite dev）忽略关闭钩子，不影响启动
+      }
       lifeLoop = new LifeLoop({
         presenceProvider: () => pl.getPresence(),
         interactionBonusProvider: () => memoryStore.getRecentInteractionBonus(),
@@ -62,6 +70,7 @@ export default function App() {
           }
         },
         tickMs: DRIVE_TICK_MS,
+        relationshipRepository,
       });
       lifeLoop.start();
 

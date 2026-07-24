@@ -28,12 +28,14 @@ import {
   recordAutonomous,
   recordPersonality,
   recordEmotion,
+  recordRelationship,
   requestPersonalityProfile,
   BUILTIN_PERSONALITY_PROFILES,
   DEFAULT_PERSONALITY_PROFILE_ID,
   type AgentRuntimeSnapshot,
   type AutonomousBehaviorTuning,
   type EmotionState,
+  type RelationshipState,
 } from "@avatar-os/runtime";
 import type { PhysicalIntentType } from "@avatar-os/primitives";
 import { avatarService, AVATAR_PROFILES } from "../avatar/avatar-profiles";
@@ -88,6 +90,18 @@ function LiveRow({ label, value }: { label: string; value: string | null }) {
 function fmtClock(ms: number | null | undefined): string | null {
   return ms == null ? null : new Date(ms).toLocaleTimeString();
 }
+
+/** 关系诊断描述符（DEV ONLY，非产品"等级"）：按依恋/熟悉度粗略归类，便于肉眼看关系积累。 */
+function relProfile(state: RelationshipState | null): string | null {
+  if (!state) return null;
+  const closeness = state.attachment * 0.5 + state.familiarity * 0.3 + state.relationalTrust * 0.2;
+  if (closeness < 0.05) return "stranger";
+  if (closeness < 0.2) return "acquaintance";
+  if (closeness < 0.45) return "familiar";
+  return "close";
+}
+
+const fmt2 = (n: number | undefined | null): string | null => (n == null ? null : n.toFixed(2));
 
 /** 把行为调音乘子压成一行可读串（PK/ST/LL = 概率/冷却乘子；UF = 面向用户权重）。 */
 function fmtTuning(t: AutonomousBehaviorTuning | null): string | null {
@@ -183,6 +197,14 @@ export function DebugConsole() {
       setSnapshot((s) => recordEmotion(s, p.state));
     });
 
+    // —— 关系（v0.3.7-A）：RELATIONSHIP_STATE_CHANGED → 只读镜像进快照 ——
+    const uRelationship = kernelEventBus.on(
+      "RELATIONSHIP_STATE_CHANGED",
+      (p: { state: RelationshipState; persistenceStatus: string }) => {
+        setSnapshot((s) => recordRelationship(s, p));
+      },
+    );
+
     // —— 输入 / 记忆：仅入日志，不进 LIVE STATE（它们是"发生了什么"，不是"当前状态"）——
     const uInput = kernelEventBus.on("SPEECH_INPUT", (p) => {
       pushLog("INPUT", `「${p.text}」`);
@@ -203,6 +225,7 @@ export function DebugConsole() {
       uAuto();
       uPersonality();
       uEmotion();
+      uRelationship();
       uInput();
       uMemory();
     };
@@ -305,6 +328,16 @@ export function DebugConsole() {
         <LiveRow label="Emotion Trust" value={snapshot.emotion ? snapshot.emotion.trust.toFixed(2) : null} />
         <LiveRow label="Emotion Loneliness" value={snapshot.emotion ? snapshot.emotion.loneliness.toFixed(2) : null} />
         <LiveRow label="Emotion Curiosity" value={snapshot.emotion ? snapshot.emotion.curiosity.toFixed(2) : null} />
+        {/* 关系层（v0.3.7-A）：纯数字 / 时间，无进度条。 */}
+        <LiveRow label="Rel Profile" value={relProfile(snapshot.relationship)} />
+        <LiveRow label="Rel Trust" value={fmt2(snapshot.relationship?.relationalTrust)} />
+        <LiveRow label="Familiarity" value={fmt2(snapshot.relationship?.familiarity)} />
+        <LiveRow label="Attachment" value={fmt2(snapshot.relationship?.attachment)} />
+        <LiveRow label="Interaction Count" value={snapshot.relationship ? String(snapshot.relationship.interactionCount) : null} />
+        <LiveRow label="Active Days" value={snapshot.relationship ? String(snapshot.relationship.activeDays) : null} />
+        <LiveRow label="First Met At" value={fmtClock(snapshot.relationship?.firstMetAt)} />
+        <LiveRow label="Last Interaction At" value={fmtClock(snapshot.relationship?.lastInteractionAt)} />
+        <LiveRow label="Persistence Status" value={snapshot.relationshipPersistenceStatus} />
       </div>
 
       {/* BODY · 运行时切换（DEV ONLY）：这是 Runtime Test Switch，不是产品功能。
@@ -378,6 +411,34 @@ export function DebugConsole() {
             },
           )}
         </div>
+      </div>
+
+      {/* RELATIONSHIP · 开发态重置 (DEV ONLY)：清空真实关系数据。
+          需二次确认，且 DebugConsole 本身仅 DEV 渲染。生产环境不暴露。
+          注意：这会删除关系持久化文件并重置为中性——仅用于测试"从陌生重新开始"。 */}
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(255,120,120,0.18)" }}>
+        <div style={{ color: "#8aa0c8", fontSize: 11, letterSpacing: 0.5, marginBottom: 4 }}>
+          RELATIONSHIP · 开发态重置 (DEV)
+        </div>
+        <button
+          onClick={() => {
+            if (!window.confirm("清空关系数据？此操作不可撤销（重置后从陌生重新开始）。")) return;
+            if (!window.confirm("再次确认：将删除真实关系记录并重置为中性。")) return;
+            kernelEventBus.emit("RELATIONSHIP_RESET_REQUEST");
+          }}
+          title="RESET RELATIONSHIP（二次确认）"
+          style={{
+            background: "rgba(255,90,90,0.08)",
+            border: "1px solid rgba(255,120,120,0.35)",
+            borderRadius: 6,
+            color: "#ff9a9a",
+            padding: "4px 8px",
+            cursor: "pointer",
+            fontSize: 11,
+          }}
+        >
+          🔄 RESET RELATIONSHIP
+        </button>
       </div>
 
       {/* 控制台：输入 + 身体自测（不依赖大脑） */}

@@ -50,8 +50,17 @@ function add(a: EmotionState, b: EmotionState): EmotionState {
   });
 }
 
+export interface AttachmentModulation {
+  /** 用户离开（不在场）时，loneliness 上升速率乘子（attachment 高 → 略 >1）。 */
+  leaveLonelinessMul: number;
+  /** 用户回来（在场）时，comfort 恢复速率乘子（attachment 高 → 略 >1）。 */
+  returnComfortMul: number;
+}
+
 export class EmotionEngine {
   private state: EmotionState;
+  /** 依恋速率调制：中性关系 = {1,1}，对 v0.3.6-C 动力学零影响。 */
+  private attachmentMod: AttachmentModulation = { leaveLonelinessMul: 1, returnComfortMul: 1 };
 
   constructor(initial?: EmotionState) {
     this.state = clampEmotion(initial ?? NEUTRAL_EMOTION);
@@ -60,6 +69,23 @@ export class EmotionEngine {
   /** 只读镜像当前情绪。 */
   getState(): EmotionState {
     return { ...this.state };
+  }
+
+  /**
+   * 以给定状态为起点（v0.3.7-A 关系基线接入点）。
+   * 中性关系 → 传入 NEUTRAL_EMOTION = 恒等，v0.3.6-C 行为完全不变。
+   * 仅在加载关系后调用一次，绝不每 tick 重置当前情绪。
+   */
+  seed(state: EmotionState): void {
+    this.state = clampEmotion(state);
+  }
+
+  /** 设置依恋速率调制（attachment 高 → 离开 loneliness 升更快 / 回来 comfort 恢复更快）。中性 = {1,1}。 */
+  setAttachmentModulation(m: AttachmentModulation): void {
+    this.attachmentMod = {
+      leaveLonelinessMul: m.leaveLonelinessMul,
+      returnComfortMul: m.returnComfortMul,
+    };
   }
 
   /** 用户互动：摸摸它(touch) 或 聊天(speak)。返回新状态。 */
@@ -83,10 +109,13 @@ export class EmotionEngine {
   tick(deltaMs: number, userPresent: boolean): EmotionState {
     const sec = Math.max(0, deltaMs) / 1000;
     const rate = userPresent ? PRESENT_PER_SEC : IDLE_PER_SEC;
+    // 依恋速率调制仅在 attachment>0 时偏离 1；中性关系恒等（v0.3.6-C 行为不变）
+    const leaveMul = userPresent ? 1 : this.attachmentMod.leaveLonelinessMul;
+    const returnMul = userPresent ? this.attachmentMod.returnComfortMul : 1;
     const scaled: EmotionState = {
-      comfort: rate.comfort * sec,
+      comfort: rate.comfort * sec * returnMul,
       trust: rate.trust * sec,
-      loneliness: rate.loneliness * sec,
+      loneliness: rate.loneliness * sec * leaveMul,
       curiosity: rate.curiosity * sec,
     };
     this.state = add(this.state, scaled);

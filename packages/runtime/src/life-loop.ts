@@ -12,7 +12,7 @@
 // ============================================================
 
 import { PhysicalIntent, PhysicalIntentType, makeIntent } from "@avatar-os/primitives";
-import { UserPresence, DEFAULT_PRESENCE } from "@avatar-os/sensor";
+import { UserPresence, DEFAULT_PRESENCE, FocusState } from "@avatar-os/sensor";
 import { MorphologyEngine } from "@avatar-os/morphology";
 import { kernelEventBus } from "./event-bus";
 import { driveEngine } from "./drive-engine";
@@ -34,6 +34,18 @@ import {
   applyEmotionToTraits,
   type EmotionState,
 } from "./emotion/emotion-state";
+import { deriveEmotionBaseline } from "./relationship/relationship-state";
+import {
+  RelationshipEngine,
+  isReturnEdge,
+  type RelationshipFocusState,
+  type RelationshipInteractionKind,
+} from "./relationship/relationship-engine";
+import {
+  type RelationshipRepository,
+  type PersistedRelationship,
+} from "./relationship/relationship-repository";
+import { RELATIONSHIP_SCHEMA_VERSION } from "./relationship/relationship-state";
 
 export interface LifeLoopDeps {
   /** 每 tick 采样真实在场信号（O1 修复入口） */
@@ -46,6 +58,8 @@ export interface LifeLoopDeps {
   interactionLogger?: (intent: PhysicalIntent) => void;
   /** tick 间隔(ms)，缺省 1000 */
   tickMs?: number;
+  /** 关系持久化仓储（v0.3.7-A）；缺省 null → 关系层不持久化（纯内存）。 */
+  relationshipRepository?: RelationshipRepository;
 }
 
 export class LifeLoop {
@@ -58,6 +72,8 @@ export class LifeLoop {
   private unbindInteraction: (() => void) | null = null;
   private unbindClip: (() => void) | null = null;
   private unbindPersonality: (() => void) | null = null;
+  /** 关系重置请求解绑（v0.3.7-A 开发态 RESET RELATIONSHIP，需二次确认）。 */
+  private unbindRelationshipReset: (() => void) | null = null;
   /** 情绪引擎（v0.3.6-C）：维护经历后的内部状态，只为行为调制提供输入，永不发意图。 */
   private readonly emotion = new EmotionEngine(createInitialEmotion());
   /** 当前生效的人格 traits（驱动调度器调音的基线；情绪在此之上做偏移，中性情绪→恒等）。 */
@@ -77,15 +93,36 @@ export class LifeLoop {
   private lastInteractionAt = 0;
   /** 当前生效的意图类型（跟踪自 PHYSICAL_INTENT_DISPATCH），用于持续型意图去重 */
   private lastIntentType: PhysicalIntentType | null = null;
+  /** 关系引擎（v0.3.7-A）：长期关系积累，纯逻辑、零总线依赖、永不发意图。 */
+  private relationship: RelationshipEngine;
+  /** 关系持久化仓储（v0.3.7-A）；null → 不持久化（纯内存）。 */
+  private readonly relationshipRepository: RelationshipRepository | null;
+  /** 上一次采样的焦点状态，用于推导"用户回来"边沿（v0.3.7-A）。 */
+  private previousFocusState: RelationshipFocusState | null = null;
+  /** start 幂等守卫：同一进程只加载关系 / 计一次会话。 */
+  private started = false;
+  /** 关系持久化诊断状态（loaded / neutral / saved / save-error / flushed / init）。 */
+  private persistenceStatus = "init";
 
   constructor(deps: LifeLoopDeps) {
     this.deps = deps;
     this.personality = deps.personality ?? DEFAULT_PERSONALITY;
     this.tickMs = deps.tickMs ?? 1000;
+    this.relationshipRepository = deps.relationshipRepository ?? null;
+    this.relationship = new RelationshipEngine();
   }
 
-  public start(): void {
-    if (this.timer !== null) return;
+  public async start(): Promise<void> {
+    if (this.timer !== null || this.started) return;
+    this.started = true;
+
+    // 加载关系（异步）→ 计算情绪基线 → 种子情绪引擎。
+    // 中性关系 → deriveEmotionBaseline 返回 NEUTRAL_EMOTION → 对 v0.3.6-C 零偏移（恒等）。
+    try {
+      await this.loadRelationship();
+    } catch {
+      // 加载失败不阻断启动，关系保持中性（构造函数已初始化）
+    }
 
     // 捕获内核仲裁出的 PhysicalIntent：注入形态层 + 落盘钩子
     // 同时把"用户主动触碰"(BOUNCE_HAPPY，如点"摸摸它")记为实质互动 → active 阶段
@@ -98,9 +135,12 @@ export class LifeLoop {
         // 用户主动触碰（"摸摸它"）→ 情绪正向反馈：comfort/trust↑、loneliness↓（v0.3.6-C）。
         this.emotion.applyInteraction("touch");
         this.syncEmotion();
+        // 仅用户真实触碰（source=SENSOR）计入关系；AI/DRIVE 不计入（v0.3.7-A）。
+        if (intent.source === "SENSOR") {
+          this.recordRelationshipInteraction("touch");
+        }
       }
       // 用户/外部意图立即打断自主行为，进入静默窗口（v0.3.6-A 调度规则：用户行为优先级 > 自主行为）。
-      // 来源识别（窄修复，不重开链路）：
       //   AI     = LLM 回复 / DebugConsole 身体自测 / Agent 提议（说话走此源）
       //   SENSOR = 用户点击"摸摸它"(BOUNCE_HAPPY, MouseSensor.ts)
       // 自主意图为 DRIVE；鼠标靠近走 SENSOR_MOUSE_NEAR(不发 PHYSICAL_INTENT_DISPATCH)，均不误触发。
@@ -126,6 +166,16 @@ export class LifeLoop {
       this.syncEmotion();
     });
 
+    // 开发态 RESET RELATIONSHIP（需二次确认，由 DebugConsole 触发）：清空真实关系数据并落盘 neutral。
+    this.unbindRelationshipReset = kernelEventBus.on("RELATIONSHIP_RESET_REQUEST", () => {
+      this.relationship.reset();
+      this.emotion.seed(deriveEmotionBaseline(this.relationship.getState()));
+      this.emotion.setAttachmentModulation({ leaveLonelinessMul: 1, returnComfortMul: 1 });
+      this.persistenceStatus = "reset";
+      this.scheduleRelationshipSave("reset");
+      this.notifyRelationship();
+    });
+
     // 初始广播默认人格：让 Runtime Snapshot / DebugConsole 立即可见（调度器默认即中性=该 Profile）。
     {
       const t = BUILTIN_PERSONALITY_PROFILES[DEFAULT_PERSONALITY_PROFILE_ID];
@@ -136,7 +186,7 @@ export class LifeLoop {
       });
     }
 
-    // 初始广播情绪（v0.3.6-C）：初始中性情绪 → 对人格零偏移，行为与 v0.3.6-B 一致。
+    // 初始广播情绪（v0.3.6-C）：初始种子情绪（=关系基线，中性时=中性）→ 对人格零偏移。
     this.syncEmotion();
 
     // 实质互动信号：说话 → 刷新 lastInteractionAt（驱动 active 阶段）。
@@ -147,6 +197,8 @@ export class LifeLoop {
       // 用户说话 → 情绪正向反馈：trust↑、comfort↑、loneliness↓（v0.3.6-C）。
       this.emotion.applyInteraction("speak");
       this.syncEmotion();
+      // 说话计为 conversation（不依赖 PhysicalIntent.source；同一次语音只此一事件，不会重复累计）。
+      this.recordRelationshipInteraction("speak");
     };
     const uInput = kernelEventBus.on("SPEECH_INPUT", markInteraction);
     this.unbindInteraction = () => {
@@ -156,7 +208,7 @@ export class LifeLoop {
     this.timer = window.setInterval(() => this.tick(), this.tickMs);
   }
 
-  public stop(): void {
+  public async stop(): Promise<void> {
     if (this.timer !== null) {
       window.clearInterval(this.timer);
       this.timer = null;
@@ -169,6 +221,18 @@ export class LifeLoop {
     this.unbindClip = null;
     this.unbindPersonality?.();
     this.unbindPersonality = null;
+    this.unbindRelationshipReset?.();
+    this.unbindRelationshipReset = null;
+    this.started = false;
+    // 退出时尽力刷新关系持久化（等待在途写入），不丢最后一次有效互动。
+    if (this.relationshipRepository) {
+      try {
+        await this.relationshipRepository.flush();
+        this.persistenceStatus = "flushed";
+      } catch {
+        // best-effort：刷新失败不影响退出
+      }
+    }
   }
 
   private tick(): void {
@@ -176,6 +240,21 @@ export class LifeLoop {
     const presence: UserPresence =
       this.deps.presenceProvider != null ? this.deps.presenceProvider() : { ...DEFAULT_PRESENCE };
     const bonus = this.deps.interactionBonusProvider?.() ?? 0.0;
+
+    // 关系层：用户"回来"边沿（AWAY → 非 AWAY）。首次非 AWAY / 持续非 AWAY 不重复计；
+    // 再次进入 AWAY 后回来才再算。每次边沿只计一次（previousFocusState 立即更新）。
+    const curFocus = presence.focusState as RelationshipFocusState;
+    if (this.previousFocusState !== null && isReturnEdge(this.previousFocusState, curFocus)) {
+      this.recordRelationshipInteraction("return");
+    }
+    this.previousFocusState = curFocus;
+
+    // 关系层：长期未互动的极慢自然回落（>1 天无互动才降，短离不降）。
+    const rt = this.relationship.tickTime(nowMs);
+    if (rt.changed) {
+      this.scheduleRelationshipSave();
+      this.notifyRelationship();
+    }
 
     // 1. 需求→压力 演算（含 PAD 情绪）
     const { state, emotionalState } = driveEngine.tick(this.tickMs, presence, this.personality, bonus);
@@ -234,6 +313,67 @@ export class LifeLoop {
       eyeOpenRatio: params.eyeOpenRatio,
       bodyScale: params.bodyScale,
       gazeBias: params.gazeBias,
+    });
+  }
+
+  // —— 关系层辅助方法（v0.3.7-A）——
+  // 铁律：关系引擎只维护状态，绝不发 PhysicalIntent；所有影响经情绪基线 → 调度器单发射口。
+
+  /** 加载持久化关系 → 种子情绪基线 → 计一次会话 → 广播初始状态。 */
+  private async loadRelationship(): Promise<void> {
+    let persisted: PersistedRelationship | null = null;
+    if (this.relationshipRepository) {
+      try {
+        persisted = await this.relationshipRepository.load();
+      } catch {
+        persisted = null;
+      }
+    }
+    if (persisted) {
+      this.relationship = new RelationshipEngine(persisted.state, persisted.history);
+      this.persistenceStatus = "loaded";
+    } else {
+      this.persistenceStatus = "neutral";
+    }
+    // 关系 → 情绪基线（中性关系恒等）→ 种子情绪引擎（不参与每 tick 重置）
+    this.emotion.seed(deriveEmotionBaseline(this.relationship.getState()));
+    // attachment 速率调制（中性关系 = {1,1}，零影响）
+    const att = this.relationship.getState().attachment;
+    this.emotion.setAttachmentModulation({
+      leaveLonelinessMul: 1 + att * 0.5,
+      returnComfortMul: 1 + att * 0.5,
+    });
+    // 会话启动（同进程只一次，由 start 幂等守卫保证）
+    const r = this.relationship.recordSession(Date.now());
+    if (r.changed) this.scheduleRelationshipSave("scheduled");
+    this.notifyRelationship();
+  }
+
+  /** 记录一次有效互动（touch/speak/return），变化时防抖保存并广播。 */
+  private recordRelationshipInteraction(kind: RelationshipInteractionKind): void {
+    const r = this.relationship.recordInteraction(kind, Date.now());
+    if (r.changed) {
+      this.scheduleRelationshipSave();
+      this.notifyRelationship();
+    }
+  }
+
+  /** 防抖保存关系状态（仅在有仓储时）。 */
+  private scheduleRelationshipSave(status = "scheduled"): void {
+    if (!this.relationshipRepository) return;
+    this.persistenceStatus = status;
+    this.relationshipRepository.scheduleSave({
+      state: this.relationship.getState(),
+      history: this.relationship.getHistory(),
+      schemaVersion: RELATIONSHIP_SCHEMA_VERSION,
+    });
+  }
+
+  /** 广播关系状态（含持久化诊断状态）供 Runtime Snapshot / DebugConsole 只读镜像。 */
+  private notifyRelationship(): void {
+    kernelEventBus.emit("RELATIONSHIP_STATE_CHANGED", {
+      state: this.relationship.getState(),
+      persistenceStatus: this.persistenceStatus,
     });
   }
 

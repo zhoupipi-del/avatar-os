@@ -3,6 +3,7 @@ import type { LifePhase } from "./life/life-phase";
 import type { AutonomousSchedulerState } from "./life/autonomous-scheduler";
 import type { PersonalityTraits, PersonalityProfileId, AutonomousBehaviorTuning } from "./personality/behavior-tuning";
 import type { EmotionState } from "./emotion/emotion-state";
+import type { RelationshipState } from "./relationship/relationship-state";
 
 export type KernelEventType =
   | "SENSOR_MOUSE_MOVE"
@@ -24,7 +25,9 @@ export type KernelEventType =
   | "ANIMATION_CLIP_STATE"
   | "PERSONALITY_PROFILE_REQUEST"
   | "PERSONALITY_PROFILE_CHANGED"
-  | "EMOTION_STATE_CHANGED";
+  | "EMOTION_STATE_CHANGED"
+  | "RELATIONSHIP_STATE_CHANGED"
+  | "RELATIONSHIP_RESET_REQUEST";
 
 export interface KernelEventPayloads {
   SENSOR_MOUSE_MOVE: { x: number; y: number };
@@ -104,6 +107,17 @@ export interface KernelEventPayloads {
    * 由 life-loop 读取后经 applyEmotionToTraits → 调度器那条既有发射口影响行为。
    */
   EMOTION_STATE_CHANGED: { state: EmotionState };
+  /**
+   * 关系状态变化（v0.3.7-A）：life-loop 加载 / 每次有效互动 / 自然回落 / 重置后广播，
+   * 供 Runtime Snapshot / DebugConsole 只读镜像。关系本身永不发意图。
+   * persistenceStatus 为诊断状态：loaded / neutral / scheduled / reset / flushed / save-error / init。
+   */
+  RELATIONSHIP_STATE_CHANGED: { state: RelationshipState; persistenceStatus: string };
+  /**
+   * 关系重置请求（v0.3.7-A，开发态）：仅由 DebugConsole（DEV ONLY）经二次确认后发出，
+   * 清空真实关系数据并落盘 neutral。生产环境不暴露此事件。
+   */
+  RELATIONSHIP_RESET_REQUEST: void;
 }
 
 type EventCallback<T> = (payload: T) => void;

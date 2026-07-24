@@ -17,6 +17,7 @@ import type { LifePhase } from "./life/life-phase";
 import type { AutonomousSchedulerState } from "./life/autonomous-scheduler";
 import type { PersonalityProfileId, PersonalityTraits, AutonomousBehaviorTuning } from "./personality/behavior-tuning";
 import type { EmotionState } from "./emotion/emotion-state";
+import type { RelationshipState } from "./relationship/relationship-state";
 
 export interface AgentRuntimeSnapshot {
   cognition: {
@@ -63,6 +64,10 @@ export interface AgentRuntimeSnapshot {
   } | null;
   /** 当前情绪状态（来源：EMOTION_STATE_CHANGED.state）。每 tick 由 life-loop 驱动后写入，绝不轮询。 */
   emotion: EmotionState | null;
+  /** 当前关系状态（来源：RELATIONSHIP_STATE_CHANGED.state）。只读镜像，绝不轮询。 */
+  relationship: RelationshipState | null;
+  /** 关系持久化诊断状态（来源：RELATIONSHIP_STATE_CHANGED.persistenceStatus）。 */
+  relationshipPersistenceStatus: string | null;
   /** 最近一次留痕的时间戳（ms） */
   timestamp: number;
 }
@@ -77,6 +82,8 @@ export function createInitialSnapshot(): AgentRuntimeSnapshot {
     autonomous: null,
     personality: null,
     emotion: null,
+    relationship: null,
+    relationshipPersistenceStatus: null,
     timestamp: 0,
   };
 }
@@ -156,4 +163,21 @@ export function recordPersonality(
  */
 export function recordEmotion(s: AgentRuntimeSnapshot, state: EmotionState): AgentRuntimeSnapshot {
   return { ...s, emotion: state, timestamp: Date.now() };
+}
+
+/**
+ * 记录当前关系状态（来源：RELATIONSHIP_STATE_CHANGED）。
+ * 纯函数式写入，与其它 recordX 同构；加载 / 每次有效互动 / 自然回落 / 重置后由 life-loop 广播写入。
+ * 关系本身不在此发意图——它只反映长期积累，由 life-loop 读取后经情绪基线影响行为。
+ */
+export function recordRelationship(
+  s: AgentRuntimeSnapshot,
+  p: { state: RelationshipState; persistenceStatus: string },
+): AgentRuntimeSnapshot {
+  return {
+    ...s,
+    relationship: p.state,
+    relationshipPersistenceStatus: p.persistenceStatus,
+    timestamp: Date.now(),
+  };
 }

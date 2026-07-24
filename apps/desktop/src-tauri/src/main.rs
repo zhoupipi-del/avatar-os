@@ -91,6 +91,7 @@ mod global_mouse {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![set_ignore_cursor_events])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
