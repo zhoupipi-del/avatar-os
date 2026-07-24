@@ -23,6 +23,7 @@ import {
   recordAction,
   recordClip,
   recordMood,
+  recordLifePhase,
   recordAvatarProfile,
   type AgentRuntimeSnapshot,
 } from "@avatar-os/runtime";
@@ -132,6 +133,12 @@ export function DebugConsole() {
       pushLog("MOOD", p.mood);
     });
 
+    // —— 生命阶段（v0.3.5-A）：LIFE_PHASE_CHANGED → 只读镜像进快照 ——
+    const uPhase = kernelEventBus.on("LIFE_PHASE_CHANGED", (p) => {
+      setSnapshot((s) => recordLifePhase(s, p.phase));
+      pushLog("LIFE", p.phase);
+    });
+
     // —— 身体侧（当前激活 profile，事实在 AvatarService，此处只读镜像）——
     const uAvatar = avatarService.subscribe((s) => {
       setSnapshot((snap) => recordAvatarProfile(snap, s.activeId));
@@ -152,6 +159,7 @@ export function DebugConsole() {
       uIntent();
       uPrimitive();
       uMood();
+      uPhase();
       uAvatar();
       uInput();
       uMemory();
@@ -238,6 +246,7 @@ export function DebugConsole() {
         <LiveRow label="Avatar" value={snapshot.avatar.animation ? "playing" : "idle"} />
         <LiveRow label="Body" value={snapshot.avatar.activeAvatarId} />
         <LiveRow label="Mood" value={snapshot.avatar.mood} />
+        <LiveRow label="Phase" value={snapshot.life.phase} />
       </div>
 
       {/* BODY · 运行时切换（DEV ONLY）：这是 Runtime Test Switch，不是产品功能。

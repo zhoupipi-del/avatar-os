@@ -1,4 +1,5 @@
 import { PhysicalIntent, LifeState, makeIntent } from "@avatar-os/primitives";
+import { phaseDefaultIntent, type LifePhase } from "./life/life-phase";
 import { kernelEventBus } from "./event-bus";
 
 export interface BehaviorLifecycle {
@@ -21,9 +22,16 @@ export interface BehaviorRule {
 export class BehaviorVM {
   private rules: Map<string, BehaviorRule> = new Map();
   private activeCandidate: { ruleId: string; priority: number; lifecycle: BehaviorLifecycle } | null = null;
+  /** 当前离散生命阶段（v0.3.5-A）：复位默认意图由阶段决定，替代硬编码 IDLE_BREATHE */
+  private phase: LifePhase = "awake";
 
   public registerRule(rule: BehaviorRule): void {
     this.rules.set(rule.id, rule);
+  }
+
+  /** 设置当前离散生命阶段，使复位时的默认意图与阶段一致（v0.3.5-A）。 */
+  public setPhase(phase: LifePhase): void {
+    this.phase = phase;
   }
 
   /**
@@ -72,8 +80,11 @@ export class BehaviorVM {
 
       this.activeCandidate = null;
 
-      // 自动复位至默认平静呼吸 Intent
-      kernelEventBus.emit("PHYSICAL_INTENT_DISPATCH", makeIntent({ type: "IDLE_BREATHE", intensity: 1.0, source: "SYSTEM" }));
+      // 自动复位至阶段驱动的默认意图（v0.3.5-A：替代硬编码 IDLE_BREATHE）
+      kernelEventBus.emit(
+        "PHYSICAL_INTENT_DISPATCH",
+        makeIntent({ ...phaseDefaultIntent(this.phase), source: "SYSTEM" }),
+      );
     }
   }
 

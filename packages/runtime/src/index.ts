@@ -11,6 +11,7 @@ export * from "./runtime-kernel";
 export * from "./utils/throttle";
 export * from "./snapshot-manager";
 export * from "./agent-runtime-snapshot";
+export * from "./life/life-phase";
 export * from "./agent-sandbox";
 export * from "./thoughts";
 export * from "./avatar-adapter";

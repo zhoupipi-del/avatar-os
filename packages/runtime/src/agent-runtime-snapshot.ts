@@ -13,6 +13,8 @@
 // 它只"采集已有状态"。下面每一个字段都来自一条【已存在】的事件；
 // 任何字段若没有真实来源，就保持 null —— 绝不编造数字（这是本模块最重要的纪律）。
 
+import type { LifePhase } from "./life/life-phase";
+
 export interface AgentRuntimeSnapshot {
   cognition: {
     /** 最近一次归一化后的意图（来源：INTENT_NORMALIZED.normalized） */
@@ -44,6 +46,10 @@ export interface AgentRuntimeSnapshot {
      */
     activeAvatarId: string | null;
   };
+  /** 当前离散生命阶段（来源：LIFE_PHASE_CHANGED.phase）。统一替代零散 IDLE_BREATHE/LOOK_AT_USER 发射。 */
+  life: {
+    phase: LifePhase | null;
+  };
   /** 最近一次留痕的时间戳（ms） */
   timestamp: number;
 }
@@ -54,6 +60,7 @@ export function createInitialSnapshot(): AgentRuntimeSnapshot {
     cognition: { lastIntent: null, confidence: null, speech: null },
     behavior: { currentAction: null, currentClip: null },
     avatar: { animation: null, mood: null, activeAvatarId: null },
+    life: { phase: null },
     timestamp: 0,
   };
 }
@@ -94,4 +101,12 @@ export function recordMood(s: AgentRuntimeSnapshot, mood: string): AgentRuntimeS
  */
 export function recordAvatarProfile(s: AgentRuntimeSnapshot, id: string): AgentRuntimeSnapshot {
   return { ...s, avatar: { ...s.avatar, activeAvatarId: id }, timestamp: Date.now() };
+}
+
+/**
+ * 记录当前离散生命阶段（来源：LIFE_PHASE_CHANGED.phase）。
+ * 纯函数式写入，与其它 recordX 同构。
+ */
+export function recordLifePhase(s: AgentRuntimeSnapshot, phase: LifePhase): AgentRuntimeSnapshot {
+  return { ...s, life: { phase }, timestamp: Date.now() };
 }

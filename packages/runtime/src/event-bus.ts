@@ -1,4 +1,5 @@
 import { Mood, PhysicalIntent } from "@avatar-os/primitives";
+import type { LifePhase } from "./life/life-phase";
 
 export type KernelEventType =
   | "SENSOR_MOUSE_MOVE"
@@ -14,7 +15,8 @@ export type KernelEventType =
   | "INTENT_NORMALIZED"
   | "MEMORY_APPEND"
   | "SPEECH_INPUT"
-  | "AVATAR_PRIMITIVE";
+  | "AVATAR_PRIMITIVE"
+  | "LIFE_PHASE_CHANGED";
 
 export interface KernelEventPayloads {
   SENSOR_MOUSE_MOVE: { x: number; y: number };
@@ -71,6 +73,8 @@ export interface KernelEventPayloads {
     type: string;
     detail: string;
   };
+  /** 离散生命阶段变化（v0.3.5-A）。去重后仅阶段真变化时广播。 */
+  LIFE_PHASE_CHANGED: { phase: LifePhase };
 }
 
 type EventCallback<T> = (payload: T) => void;
