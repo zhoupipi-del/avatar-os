@@ -24,18 +24,22 @@ export interface AvatarProfile {
 
 /**
  * Fantasy Warrior（Showcase Body）— v0.3.4-B 经同一条 activate() 路径注册，不写特判。
- * 只挂已标定的 GREET（NlaTrack.002 = 摇头打招呼）；下腰/抬起双手/奔跑 三项不注册，
- * 等 v0.3.4 New Intent Vocabulary 给 warrior 定专属词（CELEBRATE/BOW/APPROACH…）再回填。
- * 不接 idle clip（4 个 clip 全动 Head/Spine 的 rotation+translation+scale，循环 idle 会压呼吸），
- * 故 idleClip="" + 程序化呼吸/headTilt（与 bag 同策略）。fitHeight=2.6 与 bag 同高，相机不调也能框住。
+ * 4 个 clip 真实语义（2026-07-25 BOSS 真机肉眼标定，以真机观感为准而非时长/数值推断）：
+ *   NlaTrack     (18.29s) → STRETCH     （压腿/拉伸准备）
+ *   NlaTrack.001 ( 2.58s) → 防御姿势    （暂不绑定，保留待 v0.3.5+ 新意图词）
+ *   NlaTrack.002 ( 5.58s) → GREET       （挥手 ✅）
+ *   NlaTrack.003 ( 1.29s) → 奔跑        （暂不绑定：奔跑非情绪动作，不接 BOUNCE_HAPPY）
+ * idleClip="" + 程序化呼吸/headTilt/gaze（与 bag 同策略，Phase 2.3 Authority 保护）。
+ * fitHeight=2.6 与 bag 同高，相机固定 [0,0.3,5] fov35 也能框住。
  */
 const WARRIOR_CONFIG: RigConfig = {
   url: "/models/fantasy-warrior.glb",
   headBone: /^head$/i, // 大小写不敏感精确匹配 "Head"（warrior 骨骼首字母大写）
-  idleClip: "", // 不接 idle clip，程序化呼吸 + headTilt
+  idleClip: "", // warrior 无静态 idle clip（4 个 clip 全带腿部动作，无循环待机，暂置空；真待机待 v0.3.5+ 资产生产流程）
   intentClip: {
-    GREET: "NlaTrack.002", // 摇头打招呼，v0.3.4-prep Step2 真机标定
-    // 其余 clip（下腰/抬起双手/奔跑）不注册：等 New Intent Vocabulary 定 warrior 专属词再回填
+    STRETCH: "NlaTrack",     // 18.29s 压腿/拉伸
+    GREET: "NlaTrack.002",   // 5.58s 挥手 ✅（原误标 .001 防御姿势，真机肉眼校正）
+    // BOUNCE_HAPPY 不接：NlaTrack.003=奔跑(非情绪动作)语义不匹配；.001=防御姿势也无快乐语义，全部暂挂
   },
   statusClip: {}, // 系统状态暂不映射到 warrior clip（未标定，保持身体能力最简）
   spineBone: "Spine01",

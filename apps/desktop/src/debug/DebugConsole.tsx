@@ -234,7 +234,7 @@ export function DebugConsole() {
         <LiveRow label="Intent" value={snapshot.cognition.lastIntent} />
         <LiveRow label="Speech" value={snapshot.cognition.speech} />
         <LiveRow label="Action" value={snapshot.behavior.currentAction} />
-        <LiveRow label="Clip" value={snapshot.behavior.currentClip} />
+        <LiveRow label="Last Clip" value={snapshot.behavior.currentClip} />
         <LiveRow label="Avatar" value={snapshot.avatar.animation ? "playing" : "idle"} />
         <LiveRow label="Body" value={snapshot.avatar.activeAvatarId} />
         <LiveRow label="Mood" value={snapshot.avatar.mood} />
