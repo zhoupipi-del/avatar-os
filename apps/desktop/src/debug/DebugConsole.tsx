@@ -25,6 +25,7 @@ import {
   recordMood,
   recordLifePhase,
   recordAvatarProfile,
+  recordAutonomous,
   type AgentRuntimeSnapshot,
 } from "@avatar-os/runtime";
 import type { PhysicalIntentType } from "@avatar-os/primitives";
@@ -74,6 +75,11 @@ function LiveRow({ label, value }: { label: string; value: string | null }) {
       </div>
     </div>
   );
+}
+
+/** 把 epoch ms 格式化为本地时钟串；null 返回 null（LiveRow 会显示破折号）。 */
+function fmtClock(ms: number | null | undefined): string | null {
+  return ms == null ? null : new Date(ms).toLocaleTimeString();
 }
 
 export function DebugConsole() {
@@ -144,6 +150,11 @@ export function DebugConsole() {
       setSnapshot((snap) => recordAvatarProfile(snap, s.activeId));
     });
 
+    // —— 自主行为调度器（v0.3.6-A）：AUTONOMOUS_BEHAVIOR_CHANGED → 只读镜像进快照 ——
+    const uAuto = kernelEventBus.on("AUTONOMOUS_BEHAVIOR_CHANGED", (p) => {
+      setSnapshot((snap) => recordAutonomous(snap, p.state));
+    });
+
     // —— 输入 / 记忆：仅入日志，不进 LIVE STATE（它们是"发生了什么"，不是"当前状态"）——
     const uInput = kernelEventBus.on("SPEECH_INPUT", (p) => {
       pushLog("INPUT", `「${p.text}」`);
@@ -161,6 +172,7 @@ export function DebugConsole() {
       uMood();
       uPhase();
       uAvatar();
+      uAuto();
       uInput();
       uMemory();
     };
@@ -247,6 +259,11 @@ export function DebugConsole() {
         <LiveRow label="Body" value={snapshot.avatar.activeAvatarId} />
         <LiveRow label="Mood" value={snapshot.avatar.mood} />
         <LiveRow label="Phase" value={snapshot.life.phase} />
+        <LiveRow label="Auto Behavior" value={snapshot.autonomous?.behavior ?? null} />
+        <LiveRow label="Auto Source" value={snapshot.autonomous?.source ?? null} />
+        <LiveRow label="Auto Started" value={fmtClock(snapshot.autonomous?.startedAt)} />
+        <LiveRow label="Auto Cooldown" value={fmtClock(snapshot.autonomous?.cooldownUntil)} />
+        <LiveRow label="Auto Interrupted" value={snapshot.autonomous?.interruptedBy ?? null} />
       </div>
 
       {/* BODY · 运行时切换（DEV ONLY）：这是 Runtime Test Switch，不是产品功能。

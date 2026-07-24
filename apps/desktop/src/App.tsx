@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { Avatar } from "./avatar/Avatar";
-import { presenceEngine } from "@avatar-os/presence";
 import { telemetry } from "@avatar-os/telemetry";
 import { memoryStore } from "@avatar-os/memory";
 import {
@@ -47,12 +46,11 @@ export default function App() {
       presenceLayer.start(() => {});
       const pl = presenceLayer;
 
-      // 生命闭环：单一 1000ms 心跳。R2 修复——PresenceEngine 不再持有独立
-      // 定时器，其微动作节律由 LifeLoop 每 tick 经 presenceEngine.step() 驱动。
+      // 生命闭环：单一 1000ms 心跳。v0.3.6-A——自主行为节律收编进 LifeLoop 内的
+      // AutonomousScheduler（阶段感知 + 冷却/打断/去重），不再依赖外部 PresenceEngine。
       lifeLoop = new LifeLoop({
         presenceProvider: () => pl.getPresence(),
         interactionBonusProvider: () => memoryStore.getRecentInteractionBonus(),
-        presenceEngine,
         interactionLogger: (intent) => {
           // O6：孤独偷看行为落盘为交互记忆，反哺记忆甜度
           if (intent.type === "PEEK") {

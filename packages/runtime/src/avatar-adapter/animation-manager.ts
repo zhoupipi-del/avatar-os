@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { buildAnimationOwnershipMap, type AnimationOwnershipMap } from "./animation-channel-scanner";
+import { kernelEventBus } from "../event-bus";
 
 /** v0.3.4-B+ Phase 2.2：Animation 生命周期事件。AnimationManager 只负责「发生了什么」，不认识 Authority。 */
 export type AnimationEvent = {
@@ -92,13 +93,20 @@ export class AnimationManager {
     action.reset().setLoop(THREE.LoopOnce, 1).fadeIn(this.fade).play();
     this.active = action;
     const clip = action.getClip();
-    if (clip) this.emit({ type: "started", clip: clip.name });
+    if (clip) {
+      this.emit({ type: "started", clip: clip.name });
+      // v0.3.6-A：广播"片段正在播放"给调度器，使其期间不插入自主动作（防动作抢身体）。
+      // 仅在 playOnce（一次性片段）广播；play(idleClip) 的循环不广播，避免误阻塞。
+      kernelEventBus.emit("ANIMATION_CLIP_STATE", { playing: true, clip: clip.name });
+    }
 
     const mixer = this.mixer;
     const finishedClip = clip ? clip.name : name;
     const done = () => {
       mixer.removeEventListener("finished", done);
       this.emit({ type: "finished", clip: finishedClip });
+      // v0.3.6-A：片段播完 → 通知调度器恢复阶段默认意图（"恢复站姿"）。
+      kernelEventBus.emit("ANIMATION_CLIP_STATE", { playing: false, clip: finishedClip });
       this.play(this.idleClip);
       onFinished?.();
     };

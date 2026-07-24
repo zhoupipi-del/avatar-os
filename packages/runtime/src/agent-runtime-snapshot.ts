@@ -14,6 +14,7 @@
 // 任何字段若没有真实来源，就保持 null —— 绝不编造数字（这是本模块最重要的纪律）。
 
 import type { LifePhase } from "./life/life-phase";
+import type { AutonomousSchedulerState } from "./life/autonomous-scheduler";
 
 export interface AgentRuntimeSnapshot {
   cognition: {
@@ -50,6 +51,8 @@ export interface AgentRuntimeSnapshot {
   life: {
     phase: LifePhase | null;
   };
+  /** 自主行为调度器状态（来源：AUTONOMOUS_BEHAVIOR_CHANGED.state）。出问题不再靠猜。 */
+  autonomous: AutonomousSchedulerState | null;
   /** 最近一次留痕的时间戳（ms） */
   timestamp: number;
 }
@@ -61,6 +64,7 @@ export function createInitialSnapshot(): AgentRuntimeSnapshot {
     behavior: { currentAction: null, currentClip: null },
     avatar: { animation: null, mood: null, activeAvatarId: null },
     life: { phase: null },
+    autonomous: null,
     timestamp: 0,
   };
 }
@@ -109,4 +113,15 @@ export function recordAvatarProfile(s: AgentRuntimeSnapshot, id: string): AgentR
  */
 export function recordLifePhase(s: AgentRuntimeSnapshot, phase: LifePhase): AgentRuntimeSnapshot {
   return { ...s, life: { phase }, timestamp: Date.now() };
+}
+
+/**
+ * 记录自主行为调度器状态（来源：AUTONOMOUS_BEHAVIOR_CHANGED.state）。
+ * 纯函数式写入，与其它 recordX 同构；仅状态有变化时由调度器广播，绝不轮询。
+ */
+export function recordAutonomous(
+  s: AgentRuntimeSnapshot,
+  state: AutonomousSchedulerState,
+): AgentRuntimeSnapshot {
+  return { ...s, autonomous: state, timestamp: Date.now() };
 }

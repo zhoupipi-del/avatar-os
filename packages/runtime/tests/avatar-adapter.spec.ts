@@ -17,6 +17,7 @@ describe("AnimationManager", () => {
       play: vi.fn(() => a),
       stop: vi.fn(() => a),
       setLoop: vi.fn(() => a),
+      getClip: vi.fn(() => ({ name: "mock-clip" })),
       clampWhenFinished: false,
     };
     return a as unknown as THREE.AnimationAction;

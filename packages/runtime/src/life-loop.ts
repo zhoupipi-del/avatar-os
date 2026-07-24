@@ -18,28 +18,8 @@ import { kernelEventBus } from "./event-bus";
 import { driveEngine } from "./drive-engine";
 import { behaviorVM } from "./behavior-vm";
 import { LifePhaseMachine, type LifePhaseSignals, INTERACTION_WINDOW_MS } from "./life/life-phase";
+import { AutonomousScheduler } from "./life/autonomous-scheduler";
 import { PersonalityVector, DEFAULT_PERSONALITY } from "./personality";
-
-/**
- * 在场微动作步进器契约（R2：由单一心跳驱动）。
- * 不依赖 @avatar-os/presence 以避免与 presence→runtime 形成循环依赖；
- * 任何拥有 step(nowMs, idleMs) 的对象（如 PresenceEngine）都可注入。
- */
-export interface PresenceStepper {
-  step(nowMs: number, idleMs: number): PhysicalIntentType | undefined;
-}
-
-/**
- * 持续型意图集合（v0.3.5-A 去重依据）：
- * 这些意图表达"一种持续状态"而非"一次动作"，下游消费全幂等
- * （morphology 覆盖赋值 / embodiment 编译为空 / 遗留 FSM 忽略），
- * 因此与当前生效意图相同时重发没有任何效果，只会刷事件噪声。
- */
-const SUSTAINED_INTENTS: ReadonlySet<PhysicalIntentType> = new Set([
-  "IDLE_BREATHE",
-  "LOOK_AT_USER",
-  "DOZE",
-]);
 
 export interface LifeLoopDeps {
   /** 每 tick 采样真实在场信号（O1 修复入口） */
@@ -50,8 +30,6 @@ export interface LifeLoopDeps {
   interactionBonusProvider?: () => number;
   /** 意图落盘钩子（如 PEEK 写入交互日志） */
   interactionLogger?: (intent: PhysicalIntent) => void;
-  /** 在场微动作节律步进器（R2：由单一心跳驱动，无独立定时器） */
-  presenceEngine?: PresenceStepper;
   /** tick 间隔(ms)，缺省 1000 */
   tickMs?: number;
 }
@@ -64,8 +42,18 @@ export class LifeLoop {
   private readonly tickMs: number;
   private unbindIntent: (() => void) | null = null;
   private unbindInteraction: (() => void) | null = null;
+  private unbindClip: (() => void) | null = null;
   /** 离散生命阶段机（v0.3.5-A）：统一替代零散 IDLE_BREATHE/LOOK_AT_USER 发射 */
   private readonly phaseMachine = new LifePhaseMachine("awake");
+  /** 自主行为调度器（v0.3.6-A）：收编原 PresenceEngine 的泊松节律，成为自主动作唯一发射口。
+   *  自身零总线依赖；意图经注入的 emit 回调发到 PHYSICAL_INTENT_DISPATCH（source=DRIVE）。 */
+  private readonly scheduler = new AutonomousScheduler({
+    emit: (p) =>
+      kernelEventBus.emit(
+        "PHYSICAL_INTENT_DISPATCH",
+        makeIntent({ type: p.type, intensity: p.intensity, source: "DRIVE" }),
+      ),
+  });
   /** 最近一次"实质交互"（说话/近场）的时间戳，用于推导 userInteracting */
   private lastInteractionAt = 0;
   /** 当前生效的意图类型（跟踪自 PHYSICAL_INTENT_DISPATCH），用于持续型意图去重 */
@@ -87,6 +75,19 @@ export class LifeLoop {
       this.lastIntentType = intent.type;
       this.deps.interactionLogger?.(intent);
       if (intent.type === "BOUNCE_HAPPY") this.lastInteractionAt = Date.now();
+      // 用户/外部意图立即打断自主行为，进入静默窗口（v0.3.6-A 调度规则：用户行为优先级 > 自主行为）。
+      // 来源识别（窄修复，不重开链路）：
+      //   AI     = LLM 回复 / DebugConsole 身体自测 / Agent 提议（说话走此源）
+      //   SENSOR = 用户点击"摸摸它"(BOUNCE_HAPPY, MouseSensor.ts)
+      // 自主意图为 DRIVE；鼠标靠近走 SENSOR_MOUSE_NEAR(不发 PHYSICAL_INTENT_DISPATCH)，均不误触发。
+      if (intent.source === "AI" || intent.source === "SENSOR") {
+        this.scheduler.notifyUserIntent(intent.type, Date.now());
+      }
+    });
+
+    // 显式动画片段播放状态：播放期间不插入自主动作，播完恢复阶段默认意图（防动作抢身体）。
+    this.unbindClip = kernelEventBus.on("ANIMATION_CLIP_STATE", (p) => {
+      this.scheduler.notifyClipPlayback(p.playing);
     });
 
     // 实质互动信号：说话 → 刷新 lastInteractionAt（驱动 active 阶段）。
@@ -112,6 +113,8 @@ export class LifeLoop {
     this.unbindIntent = null;
     this.unbindInteraction?.();
     this.unbindInteraction = null;
+    this.unbindClip?.();
+    this.unbindClip = null;
   }
 
   private tick(): void {
@@ -147,17 +150,12 @@ export class LifeLoop {
     behaviorVM.evaluate(state);
     behaviorVM.tick(this.tickMs);
 
-    // 3.5 在场微动作节律（R2：纯步进，由本单一心跳驱动，无独立定时器）
-    // v0.3.5-A 去重：持续型意图（呼吸/注视/打盹）与当前生效意图相同时不再重发——
-    // 下游全幂等（morphology 覆盖赋值、embodiment 编译为空、FSM 忽略），重发＝纯事件噪声。
-    // 一次性动作（GREET/STRETCH/PEEK/BOUNCE_HAPPY）不去重，每次派发都有真实动作。
-    const rhythm = this.deps.presenceEngine?.step(nowMs, presence.idleTimeMs ?? 0);
-    if (rhythm && !(SUSTAINED_INTENTS.has(rhythm) && rhythm === this.lastIntentType)) {
-      kernelEventBus.emit(
-        "PHYSICAL_INTENT_DISPATCH",
-        makeIntent({ type: rhythm, intensity: 0.3, source: "DRIVE" }),
-      );
-    }
+    // 3.5 自主行为调度（v0.3.6-A）：收编原 PresenceEngine 的泊松节律，成为阶段感知的单一发射口。
+    // 持续型默认意图(呼吸/注视/打盹)与一次性自主动作(STRETCH/PEEK/LONELY_WAIT)均由它统一派发，
+    // 经冷却/全局间隔/用户打断/剪辑占用全部闸门管制——根除"意图风暴"。
+    // 仅状态有变化时返回快照，广播 AUTONOMOUS_BEHAVIOR_CHANGED 供 Runtime Snapshot / DebugConsole 观测。
+    const schedState = this.scheduler.tick(this.phaseMachine.phase, nowMs, this.lastIntentType);
+    if (schedState) kernelEventBus.emit("AUTONOMOUS_BEHAVIOR_CHANGED", { state: schedState });
 
     // 4. Morphology：意图+状态 → 渲染参数
     const params = this.morphology.render(state, emotionalState);

@@ -1,5 +1,6 @@
 import { Mood, PhysicalIntent } from "@avatar-os/primitives";
 import type { LifePhase } from "./life/life-phase";
+import type { AutonomousSchedulerState } from "./life/autonomous-scheduler";
 
 export type KernelEventType =
   | "SENSOR_MOUSE_MOVE"
@@ -16,7 +17,9 @@ export type KernelEventType =
   | "MEMORY_APPEND"
   | "SPEECH_INPUT"
   | "AVATAR_PRIMITIVE"
-  | "LIFE_PHASE_CHANGED";
+  | "LIFE_PHASE_CHANGED"
+  | "AUTONOMOUS_BEHAVIOR_CHANGED"
+  | "ANIMATION_CLIP_STATE";
 
 export interface KernelEventPayloads {
   SENSOR_MOUSE_MOVE: { x: number; y: number };
@@ -75,6 +78,11 @@ export interface KernelEventPayloads {
   };
   /** 离散生命阶段变化（v0.3.5-A）。去重后仅阶段真变化时广播。 */
   LIFE_PHASE_CHANGED: { phase: LifePhase };
+  /** 自主行为调度器状态变化（v0.3.6-A）：仅状态有变化时广播，供 Runtime Snapshot / DebugConsole 观测。 */
+  AUTONOMOUS_BEHAVIOR_CHANGED: { state: AutonomousSchedulerState };
+  /** 显式动画片段播放状态（v0.3.6-A）：由 AnimationManager.playOnce 生命周期驱动，
+   *  供调度器得知"身体正忙"从而不插入自主动作。idle 循环片段(play)不广播此事件。 */
+  ANIMATION_CLIP_STATE: { playing: boolean; clip: string };
 }
 
 type EventCallback<T> = (payload: T) => void;
