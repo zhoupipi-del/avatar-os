@@ -14,11 +14,11 @@
 // 真正的状态与变更权限封装在此类内部；UI 只能调用 activate(id)，
 // 不能直接 load GLB。这把"身体所有权"从 React 隐式持有提升到 runtime 事实。
 
-/** 激活身体 profile 的 id。当前合法值由 desktop catalog 约束（bag-character / fantasy-warrior）。 */
+/** 激活身体 profile 的 id。desktop catalog 约束合法值（含 bag-character / fantasy-warrior / void-vrm）；产品默认 void-vrm（见 avatar-profiles DEFAULT_AVATAR_ID）。 */
 export type AvatarId = string;
 
 export interface AvatarServiceSnapshot {
-  /** 当前激活的身体 profile id；恒非空（待机默认 bag-character） */
+  /** 当前激活的身体 profile id；恒非空（待机默认 void-vrm） */
   activeId: AvatarId;
 }
 
@@ -29,7 +29,7 @@ export class AvatarService {
   private readonly listeners = new Set<Listener>();
   private readonly defaultId: AvatarId;
 
-  constructor(defaultId: AvatarId = "bag-character") {
+  constructor(defaultId: AvatarId = "void-vrm") {
     this.defaultId = defaultId;
     this.activeId = defaultId;
   }

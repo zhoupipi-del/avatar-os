@@ -7,7 +7,7 @@
 // 职责边界（与 BOSS 拍板一致）：
 //   - avatarService        → 持有"当前激活的是谁"这一事实（runtime，可订阅）
 //   - AVATAR_PROFILES    → 持有 id → RigConfig 映射（desktop，资产知识）
-//   - resolveAvatarProfile → 解析 + 非法 id 回退默认（bag）
+//   - resolveAvatarProfile → 解析 + 非法 id 回退默认（void-vrm）
 //   - attachAvatarPersistence → Composition Root 装配缝（Phase C 接真实存储）
 //
 // UI / React 只：订阅 avatarService 拿 activeId → resolveAvatarProfile 拿 config → 渲染。
@@ -66,15 +66,25 @@ export const AVATAR_PROFILES: Record<AvatarId, AvatarProfile> = {
   },
 };
 
-export const DEFAULT_AVATAR_ID: AvatarId = "bag-character";
+export const DEFAULT_AVATAR_ID: AvatarId = "void-vrm";
 
 /**
- * 解析 profile；非法 / 未知 id 回退默认（bag），
+ * 解析 profile；非法 / 未知 id 回退默认（void-vrm），
  * 避免激活一个不存在的身体导致渲染崩溃。
  */
 export function resolveAvatarProfile(id: AvatarId): AvatarProfile {
   return AVATAR_PROFILES[id] ?? AVATAR_PROFILES[DEFAULT_AVATAR_ID]!;
 }
+
+/**
+ * V2-0 迁移：旧 body id → 当前唯一产品 body（void-vrm）。
+ * 旧持久化状态（bag-character / fantasy-warrior）读取时自动迁移，
+ * 不物理删除旧资产 / 皮肤文件（留待 V5 统一清理）。
+ */
+export const LEGACY_BODY_MIGRATION: Record<AvatarId, AvatarId> = {
+  "bag-character": VOID_AVATAR_PROFILE.id,
+  "fantasy-warrior": VOID_AVATAR_PROFILE.id,
+};
 
 /**
  * 身体所有权单例：在模块加载时实例化。
@@ -106,6 +116,9 @@ export function attachAvatarPersistence(
   service: AvatarService = avatarService,
   adapter: AvatarStorageAdapter = IN_MEMORY_AVATAR_STORAGE,
 ): () => void {
-  service.restore(adapter.load());
+  const loaded = adapter.load();
+  // V2-0：旧 body id 自动迁移到 void-vrm（旧资产/Skin 保留不删）
+  const migrated = loaded ? (LEGACY_BODY_MIGRATION[loaded] ?? loaded) : loaded;
+  service.restore(migrated);
   return service.subscribe((s) => adapter.save(s.activeId));
 }

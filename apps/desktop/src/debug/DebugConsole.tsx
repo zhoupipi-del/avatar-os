@@ -39,6 +39,7 @@ import {
 } from "@avatar-os/runtime";
 import type { PhysicalIntentType } from "@avatar-os/primitives";
 import { avatarService, AVATAR_PROFILES } from "../avatar/avatar-profiles";
+import { VOID_AVATAR_PROFILE } from "../avatar/void-avatar-profile";
 
 interface LogEntry {
   id: number;
@@ -349,7 +350,10 @@ export function DebugConsole() {
           BODY · 运行时切换 (DEV)
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {Object.keys(AVATAR_PROFILES).map((id) => {
+          {/* V2-0：产品入口只保留 VOID，隐藏 BAG / Warrior 切换按钮（旧资产/Skin 保留不删） */}
+          {Object.keys(AVATAR_PROFILES)
+            .filter((id) => id === VOID_AVATAR_PROFILE.id)
+            .map((id) => {
             const isActive = id === snapshot.avatar.activeAvatarId;
             return (
               <button
