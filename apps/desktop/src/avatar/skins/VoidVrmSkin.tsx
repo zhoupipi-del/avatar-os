@@ -270,10 +270,10 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
       const gx = THREE.MathUtils.clamp(gazeBus.x / 8, -1, 1);
       const gy = THREE.MathUtils.clamp(gazeBus.y / 8, -1, 1);
 
-      const targetX = THREE.MathUtils.clamp(-gy * 0.28, -0.28, 0.28);
-      const targetY = THREE.MathUtils.clamp(gx * 0.42, -0.42, 0.42);
+      const targetX = THREE.MathUtils.clamp(-gy * 0.22, -0.22, 0.22);
+      const targetY = THREE.MathUtils.clamp(gx * 0.34, -0.34, 0.34);
 
-      const blend = 1 - Math.exp(-delta * 10);
+      const blend = 1 - Math.exp(-delta * 8);
       previous.x = THREE.MathUtils.lerp(previous.x, targetX, blend);
       previous.y = THREE.MathUtils.lerp(previous.y, targetY, blend);
 
