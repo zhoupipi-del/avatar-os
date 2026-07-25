@@ -3,7 +3,7 @@
  *
  * 分层设计:
  *   VRMA 动作        → 身体骨骼动画（AnimationManager 驱动）
- *   Emotion State    → happy / sad / relaxed / surprised 表情
+ *   Emotion State    → happy / sad / relaxed / surprised 表情（V2: 权重走 VOID_CALIBRATION.presets）
  *   BlinkController  → 眨眼
  *   gazeBus + LookAt → 眼神跟随
  *   SpringBone       → 头发和服装摆动
@@ -11,6 +11,9 @@
  * canWrite 使用真实 BodyChannelAuthority 两参数 API:
  *   authority.canWrite({ bone: spine.name, property: "rotation" }, "expression")
  *   返回 "ALLOW" | "YIELD"（不是布尔值）
+ *
+ * V2 合并：面部 BlendShape 权重从 VOID_CALIBRATION.expression.presets 读入，
+ * 保留 canWrite 闸门 / lean()/tilt() / chest/head 写入 / 构造器结构。
  */
 
 import * as THREE from "three";
@@ -19,6 +22,7 @@ import type {
   ExpressionController,
   ChannelProperty,
 } from "@avatar-os/runtime";
+import { VOID_CALIBRATION, type VoidExpressionName } from "../void-calibration";
 
 type VrmFace =
   | "happy"
@@ -36,9 +40,19 @@ const FACES: readonly VrmFace[] = [
 export class VrmExpressionController
   implements ExpressionController
 {
-  private activeFace: VrmFace | null = null;
-  private strength = 0;
-  private targetStrength = 0;
+  // ─── V2 面部权重：从 VOID_CALIBRATION.presets 读入 ───
+  private readonly facialTargets: Record<VrmFace, number> = {
+    happy: 0,
+    sad: 0,
+    relaxed: 0,
+    surprised: 0,
+  };
+  private readonly facialCurrent: Record<VrmFace, number> = {
+    happy: 0,
+    sad: 0,
+    relaxed: 0,
+    surprised: 0,
+  };
 
   /** chest 或 spine 骨骼（用于 lean 前后倾） */
   private readonly chest: THREE.Object3D | null;
@@ -68,31 +82,49 @@ export class VrmExpressionController
 
     this.head =
       vrm.humanoid.getNormalizedBoneNode("head");
+
+    // 初始表情 = idle 预设
+    this.setPreset("idle");
+  }
+
+  // ─── 内部：面部预设切换 ───
+
+  private setPreset(name: VoidExpressionName): void {
+    const preset = VOID_CALIBRATION.expression.presets[name];
+    this.facialTargets.happy = preset.happy;
+    this.facialTargets.sad = preset.sad;
+    this.facialTargets.relaxed = preset.relaxed;
+    this.facialTargets.surprised = preset.surprised;
   }
 
   // ─── ExpressionController 接口实现 ───
 
   public happy(): void {
-    this.select("happy", 0.85);
+    this.setPreset("happy");
+    this.leanTarget = THREE.MathUtils.degToRad(-4);
+    this.tiltTarget = THREE.MathUtils.degToRad(2);
   }
 
   public sad(): void {
-    this.select("sad", 0.75);
+    this.setPreset("sad");
+    this.leanTarget = THREE.MathUtils.degToRad(7);
+    this.tiltTarget = 0;
   }
 
   public thinking(): void {
-    this.select("relaxed", 0.28);
-    this.tiltTarget = THREE.MathUtils.degToRad(7);
+    this.setPreset("thinking");
+    this.leanTarget = 0;
+    this.tiltTarget = THREE.MathUtils.degToRad(8);
   }
 
   public drowsy(): void {
-    this.select("relaxed", 0.55);
-    this.leanTarget = THREE.MathUtils.degToRad(5);
+    this.setPreset("drowsy");
+    this.leanTarget = THREE.MathUtils.degToRad(9);
+    this.tiltTarget = THREE.MathUtils.degToRad(3);
   }
 
   public idle(): void {
-    this.activeFace = null;
-    this.targetStrength = 0;
+    this.setPreset("idle");
     this.leanTarget = 0;
     this.tiltTarget = 0;
   }
@@ -108,43 +140,43 @@ export class VrmExpressionController
   /**
    * 每帧调用。平滑 lerp 目标姿态到骨骼 + 写入 VRM BlendShape。
    *
-   * 更新顺序（与 StandardAvatarSkin 一致）:
-   *   1. strength lerp
-   *   2. expressionManager 写入（需 authority 允许）
-   *   3. chest rotation.x = lean（需 authority 允许）
-   *   4. head rotation.z = tilt（需 authority 允许）
+   * 更新顺序（保留原有 canWrite 闸门 + V2 面部权重插值）:
+   *   1. expressionManager BlendShape 写入（需 authority 允许）
+   *   2. chest rotation.x = lean（需 authority 允许）
+   *   3. head rotation.z = tilt（需 authority 允许）
    */
   public update(delta: number): void {
-    const alpha = 1 - Math.exp(-delta * 8);
-
-    this.strength = THREE.MathUtils.lerp(
-      this.strength,
-      this.targetStrength,
-      alpha,
+    const safeDelta = THREE.MathUtils.clamp(
+      delta,
+      0,
+      VOID_CALIBRATION.stability.maxDeltaSeconds,
     );
+    const alpha = 1 - Math.exp(-safeDelta * VOID_CALIBRATION.expression.response);
 
-    // 表情 BlendShape
+    // 表情 BlendShape（V2: 从 facialCurrent 逐面 lerp 到 facialTargets）
     if (
       this.canWrite(
         { bone: "expression", property: "morphTargetInfluences" as ChannelProperty },
         "expression",
       ) === "ALLOW"
     ) {
-      const manager = this.vrm.expressionManager;
+      if (VOID_CALIBRATION.features.calibratedExpression) {
+        const manager = this.vrm.expressionManager;
 
-      if (manager) {
-        for (const face of FACES) {
-          if (manager.getExpression(face)) {
-            manager.setValue(
-              face,
-              face === this.activeFace ? this.strength : 0,
+        if (manager) {
+          for (const face of FACES) {
+            this.facialCurrent[face] = THREE.MathUtils.lerp(
+              this.facialCurrent[face],
+              this.facialTargets[face],
+              alpha,
             );
+            manager.setValue(face, this.facialCurrent[face]);
           }
         }
       }
     }
 
-    // 躯干前后倾（chest/spine rotation.x）
+    // 躯干前后倾（chest/spine rotation.x，canWrite 闸门保留）
     if (
       this.chest &&
       this.canWrite(
@@ -159,7 +191,7 @@ export class VrmExpressionController
       );
     }
 
-    // 头部侧倾（head rotation.z）
+    // 头部侧倾（head rotation.z，canWrite 闸门保留）
     if (
       this.head &&
       this.canWrite(
@@ -173,12 +205,5 @@ export class VrmExpressionController
         alpha,
       );
     }
-  }
-
-  // ─── 内部 ───
-
-  private select(face: VrmFace, strength: number): void {
-    this.activeFace = face;
-    this.targetStrength = strength;
   }
 }

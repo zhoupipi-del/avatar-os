@@ -1,60 +1,155 @@
-/**
- * VRM 眨眼控制器 — 用 VRM expressionManager 的 "blink" BlendShape
- *
- * AvatarSample_Z.vrm 有完整 blink 表情，不需要伪造眼皮骨骼。
- * 程序化随机眨眼：间隔 2.2~6.0s, 持续 0.16s, 三角波插值。
- */
-
+import * as THREE from "three";
 import type { VRM } from "@pixiv/three-vrm";
+import { VOID_CALIBRATION } from "../void-calibration";
+
+type BlinkPhase = "waiting" | "closing" | "holding" | "opening" | "double-gap";
+
+export type BlinkRandomSource = () => number;
 
 export class VrmBlinkController {
-  private elapsed = 0;
-  /** 下次眨眼触发时间（从上次 blink 结束算起） */
-  private nextBlinkAt = 2.5;
-  /** 当前 blink 进行时间（<0 表示不在眨眼） */
-  private blinkElapsed = -1;
+  private phase: BlinkPhase = "waiting";
+  private phaseElapsed = 0;
+  private waitRemaining = 0;
+  private doubleBlinkPending = false;
 
-  /**
-   * 每帧调用。驱动程序化眨眼。
-   *
-   * @param vrm - 目标 VRM 实例
-   * @param delta - 帧间隔（秒）
-   */
-  public update(vrm: VRM, delta: number): void {
-    const expressions = vrm.expressionManager;
+  constructor(
+    private readonly vrm: VRM,
+    private readonly random: BlinkRandomSource = Math.random,
+  ) {
+    this.scheduleNext();
+    this.writeBlink(0);
+  }
 
-    if (!expressions) return;
-
-    this.elapsed += delta;
-
-    // 触发新一次眨眼
-    if (this.blinkElapsed < 0 && this.elapsed >= this.nextBlinkAt) {
-      this.blinkElapsed = 0;
-      this.elapsed = 0;
-      // 随机间隔 2.2 ~ 6.0 秒
-      this.nextBlinkAt = 2.2 + Math.random() * 3.8;
-    }
-
-    // 不在眨眼周期内
-    if (this.blinkElapsed < 0) {
+  update(delta: number): void {
+    if (!VOID_CALIBRATION.features.naturalBlink) {
+      this.writeBlink(0);
       return;
     }
 
-    this.blinkElapsed += delta;
+    const safeDelta = THREE.MathUtils.clamp(
+      delta,
+      0,
+      VOID_CALIBRATION.stability.maxDeltaSeconds,
+    );
 
-    const duration = 0.16; // 眨眼总时长（秒）
-    const progress = this.blinkElapsed / duration;
-
-    // 三角波：0→1→0
-    const value =
-      progress < 0.5 ? progress * 2 : (1 - progress) * 2;
-
-    expressions.setValue("blink", Math.max(0, Math.min(1, value)));
-
-    // 眨眼结束，重置
-    if (progress >= 1) {
-      expressions.setValue("blink", 0);
-      this.blinkElapsed = -1;
+    switch (this.phase) {
+      case "waiting":
+        this.updateWaiting(safeDelta);
+        break;
+      case "closing":
+        this.updateClosing(safeDelta);
+        break;
+      case "holding":
+        this.updateHolding(safeDelta);
+        break;
+      case "opening":
+        this.updateOpening(safeDelta);
+        break;
+      case "double-gap":
+        this.updateDoubleGap(safeDelta);
+        break;
     }
+  }
+
+  reset(): void {
+    this.phase = "waiting";
+    this.phaseElapsed = 0;
+    this.doubleBlinkPending = false;
+    this.scheduleNext();
+    this.writeBlink(0);
+  }
+
+  private updateWaiting(delta: number): void {
+    this.writeBlink(0);
+    this.waitRemaining -= delta;
+    if (this.waitRemaining <= 0) {
+      this.beginBlink();
+    }
+  }
+
+  private updateClosing(delta: number): void {
+    this.phaseElapsed += delta;
+    const progress = THREE.MathUtils.clamp(
+      this.phaseElapsed / VOID_CALIBRATION.blink.closeSeconds,
+      0,
+      1,
+    );
+    this.writeBlink(this.smoothStep(progress));
+
+    if (progress >= 1) {
+      this.phase = "holding";
+      this.phaseElapsed = 0;
+    }
+  }
+
+  private updateHolding(delta: number): void {
+    this.phaseElapsed += delta;
+    this.writeBlink(1);
+
+    if (this.phaseElapsed >= VOID_CALIBRATION.blink.holdSeconds) {
+      this.phase = "opening";
+      this.phaseElapsed = 0;
+    }
+  }
+
+  private updateOpening(delta: number): void {
+    this.phaseElapsed += delta;
+    const progress = THREE.MathUtils.clamp(
+      this.phaseElapsed / VOID_CALIBRATION.blink.openSeconds,
+      0,
+      1,
+    );
+    this.writeBlink(1 - this.smoothStep(progress));
+
+    if (progress < 1) {
+      return;
+    }
+
+    this.writeBlink(0);
+    this.phaseElapsed = 0;
+
+    if (this.doubleBlinkPending) {
+      this.doubleBlinkPending = false;
+      this.phase = "double-gap";
+      return;
+    }
+
+    this.phase = "waiting";
+    this.scheduleNext();
+  }
+
+  private updateDoubleGap(delta: number): void {
+    this.phaseElapsed += delta;
+    this.writeBlink(0);
+
+    if (this.phaseElapsed >= VOID_CALIBRATION.blink.doubleBlinkGapSeconds) {
+      this.phase = "closing";
+      this.phaseElapsed = 0;
+    }
+  }
+
+  private beginBlink(): void {
+    this.phase = "closing";
+    this.phaseElapsed = 0;
+    this.doubleBlinkPending =
+      this.random() < VOID_CALIBRATION.blink.doubleBlinkChance;
+  }
+
+  private scheduleNext(): void {
+    const { minIntervalSeconds, maxIntervalSeconds } = VOID_CALIBRATION.blink;
+    this.waitRemaining =
+      minIntervalSeconds +
+      this.random() * (maxIntervalSeconds - minIntervalSeconds);
+  }
+
+  private writeBlink(value: number): void {
+    this.vrm.expressionManager?.setValue(
+      "blink",
+      THREE.MathUtils.clamp(value, 0, 1),
+    );
+  }
+
+  private smoothStep(value: number): number {
+    return value * value * (3 - 2 * value);
   }
 }

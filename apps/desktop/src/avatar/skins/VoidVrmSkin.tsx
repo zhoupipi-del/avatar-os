@@ -1,23 +1,16 @@
 /**
  * VoidVrmSkin — VRM 皮肤组件（AvatarSample_Z.vrm）
  *
- * 管线：
+ * 管线（V2 Final Calibration）:
  *   loadVrm(.vrm) → [可选] loadVrmActions(.vrma) → AnimationManager
  *   → BodyChannelAuthority 仲裁
- *   → VrmExpressionController (BlendShape + 骨骼 lean/tilt)
- *   → VrmBlinkController (程序化眨眼)
- *   → gazeBus (视线跟随，复用现有 LookAt 骨骼或 VRM LookAt)
+ *   → VrmGazeController (Head/Neck/Spine 80/15/5 additive overlay)
+ *   → VrmExpressionController (BlendShape + 骨骼 lean/tilt, canWrite 闸门)
+ *   → VrmBlinkController (程序化眨眼, 5-phase smoothstep)
+ *   → VrmStabilityGuard (DEV-only NaN/∞ 检查)
+ *   → gazeBus.headTilt (Z 轴 roll, canWrite 闸门)
  *   → vrm.update(delta) (SpringBone / 约束)
  *   → render
- *
- * 与 StandardAvatarSkin 的关系：
- *   - 同样实现 Authority 门控（canWrite 两参数 API）
- *   - 同样消费 gazeBus 做头部跟随
- *   - 不同：数据源是 VRM（非 GLB），表情走 BlendShape（非骨骼旋转）
- *   - 不同：有独立的 blink 控制器（VRM 有 blink 表情）
- *
- * V1 目标：模型显示 + 材质 + 眨眼 + 表情 + LookAt + SpringBone。
- * 无 VRMA 时程序化降级（呼吸/headTilt/gaze）。
  */
 
 import { useEffect, useRef, Suspense, useState } from "react";
@@ -39,6 +32,9 @@ import { loadVrm, disposeVrm } from "../vrm/load-vrm";
 import { loadVrmActions } from "../vrm/load-vrma";
 import { VrmBlinkController } from "../vrm/VrmBlinkController";
 import { VrmExpressionController } from "../vrm/VrmExpressionController";
+import { VrmGazeController } from "../vrm/VrmGazeController";
+import { VrmStabilityGuard } from "../vrm/VrmStabilityGuard";
+import { validateVoidCalibration } from "../void-calibration";
 import { calculateVisibleMeshFrame, type VrmFrameTransform } from "../vrm/vrm-framing";
 import { VOID_AVATAR_PROFILE } from "../void-avatar-profile";
 import type { SkinProps } from "./types";
@@ -50,6 +46,8 @@ interface VrmEngine {
   bridge: BehaviorVMAdapter;
   blink: VrmBlinkController;
   authority: BodyChannelAuthority;
+  gaze: VrmGazeController;
+  stability: VrmStabilityGuard;
 }
 
 /**
@@ -59,9 +57,7 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
   const [vrm, setVrm] = useState<import("@pixiv/three-vrm").VRM | null>(null);
   const engineRef = useRef<VrmEngine | null>(null);
   const containerRef = useRef<THREE.Group>(null);
-  // gaze 叠加量缓存：动画写基础头部姿态后，由本组件叠加幅度有限的视线偏移；
-  // 每帧先撤销上一帧叠加量避免累计漂移，再叠加本帧平滑后偏移。
-  const gazeOverlayRef = useRef({ x: 0, y: 0 });
+  const stabilityElapsedRef = useRef(0);
   const [frame, setFrame] = useState<VrmFrameTransform | null>(null);
 
   // ─── 加载 VRM ───
@@ -94,24 +90,34 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
     let cancelled = false;
 
     const setup = async () => {
-      // 0. 取景：只按可见网格算包围盒，缩放到 fitHeight 并居中（忽略 SpringBone/collider 空节点）
+      // DEV 门控：校验配置合法性（生产构建不跑）
+      if (import.meta.env.DEV) {
+        validateVoidCalibration();
+      }
+
+      // 0. 取景：只按可见网格算包围盒，缩放到 fitHeight 并居中
       setFrame(calculateVisibleMeshFrame(vrm.scene, VOID_AVATAR_PROFILE.fitHeight));
 
-      // 1. 表情控制器（实现 ExpressionController 接口）
+      // 1. 表情控制器（实现 ExpressionController 接口，canWrite 闭包延迟绑定）
       const expression = new VrmExpressionController(
         vrm,
-        // canWrite 闭包：延迟绑定到 authority（下方创建后自然生效）
         (ch, owner) =>
           engineRef.current?.authority.canWrite(ch, owner) ?? "ALLOW",
       );
 
-      // 2. 眨眼控制器
-      const blink = new VrmBlinkController();
+      // 2. 眨眼控制器（V2: 需要 vrm 实例引用）
+      const blink = new VrmBlinkController(vrm);
 
-      // 3. Authority（动画通道仲裁）
+      // 3. 视线控制器（V2: additive overlay, 80/15/5 分摊）
+      const gaze = new VrmGazeController();
+
+      // 4. 稳定性守卫（V2: delta 钳制 + DEV-only transform 检查）
+      const stability = new VrmStabilityGuard();
+
+      // 5. Authority（动画通道仲裁）
       const authority = new BodyChannelAuthority();
 
-      // 4. 动画系统（可选 VRMA，无则纯程序化）
+      // 6. 动画系统（可选 VRMA，无则纯程序化）
       let animation: AnimationManager | null = null;
       const actionUrls = VOID_AVATAR_PROFILE.actions;
 
@@ -149,9 +155,8 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
         }
       }
 
-      // 5. 行为适配器（意图 → 动画/表情桥接）
+      // 7. 行为适配器（意图 → 动画/表情桥接）
       const embodiment = new EmbodimentRuntime();
-      // TSX 中 ??/箭头函数后直接跟 {} 会被解析器当 JSX，必须提前提取到变量
       const noOpAnimation: AnimationManager = {
         tick: (_delta: number) => {},
         play: (_clip?: string) => {},
@@ -163,7 +168,6 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
         expression,
         embodiment,
         {
-          // BehaviorVMAdapter 需要 PrimitiveBindings；VRM profile 字段不同，手动构造
           bindings: {
             idleClip: "IDLE",
             intentClip: Object.fromEntries(
@@ -172,7 +176,7 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
               ),
             ),
             statusClip: {},
-            spineBone: "spine", // VRM humanoid 有标准 spine 骨骼
+            spineBone: "spine",
           },
           capability: {
             hasSkeleton: true,
@@ -202,9 +206,7 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
 
       if (cancelled) {
         bridge.disconnect();
-        if (animation) {
-          // cleanup mixer
-        }
+        gaze.dispose(vrm);
         return;
       }
 
@@ -215,6 +217,8 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
         bridge,
         blink,
         authority,
+        gaze,
+        stability,
       };
       engineRef.current = engine;
 
@@ -235,53 +239,34 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
       const eng = engineRef.current;
       if (eng) {
         eng.bridge.disconnect();
+        eng.gaze.dispose(eng.vrm);
         disposeVrm(eng.vrm);
       }
       engineRef.current = null;
     };
   }, [vrm]);
 
-  // ─── 每帧管线 ───
-  useFrame((state, delta) => {
+  // ─── 每帧管线（V2 Final Calibration 锁定顺序） ───
+  useFrame((_, rawDelta) => {
     const eng = engineRef.current;
     if (!eng || !eng.vrm) return;
 
-    // 1. AnimationManager.tick（推进动画混合器）
+    const delta = eng.stability.sanitizeDelta(rawDelta);
+
+    // 1. 撤销上一帧程序化 LookAt 叠加
+    eng.gaze.clear(eng.vrm);
+
+    // 2. VRMA 写入当前动画基础姿态
     if (eng.animation) {
       eng.animation.tick(delta);
     }
 
-    // 2. VrmExpressionController.update（BlendShape + lean/tilt，内部查 Authority）
-    eng.expression.update(delta);
+    // 3. 在动画姿态之后叠加 Head/Neck/Spine LookAt
+    eng.gaze.apply(eng.vrm, { x: gazeBus.x, y: gazeBus.y }, delta);
 
-    // 3. 视线跟随（head 骨骼）
-    //    注意：VOID 的 idle VRMA 片段会占用 Head.rotation 通道，导致
-    //    BodyChannelAuthority 对 gaze 返回 YIELD，canWrite 独占写入不可用。
-    //    因此改为「动画之后 additive overlay」：mixer 已把 VRMA 基础头部姿态写到
-    //    head.rotation，这里先撤销上一帧 gaze 叠加量（防累计漂移），再叠加本帧
-    //    平滑后的小幅视线偏移。不抢动画、不放开 authority、不影响 BAG/Warrior。
+    // 3b. headTilt（Z 轴 roll，与 gaze 的 X/Y 不同轴，canWrite 闸门保留）
     const head = eng.vrm.humanoid.getNormalizedBoneNode("head");
     if (head) {
-      const previous = gazeOverlayRef.current;
-      // 先撤销上一帧 gaze overlay，恢复 mixer 写入的 VRMA 基础头部姿态
-      head.rotation.x -= previous.x;
-      head.rotation.y -= previous.y;
-
-      const gx = THREE.MathUtils.clamp(gazeBus.x / 8, -1, 1);
-      const gy = THREE.MathUtils.clamp(gazeBus.y / 8, -1, 1);
-
-      const targetX = THREE.MathUtils.clamp(-gy * 0.22, -0.22, 0.22);
-      const targetY = THREE.MathUtils.clamp(gx * 0.34, -0.34, 0.34);
-
-      const blend = 1 - Math.exp(-delta * 8);
-      previous.x = THREE.MathUtils.lerp(previous.x, targetX, blend);
-      previous.y = THREE.MathUtils.lerp(previous.y, targetY, blend);
-
-      // 在 VRMA 当前头部姿态上叠加平滑后的视线偏移
-      head.rotation.x += previous.x;
-      head.rotation.y += previous.y;
-
-      // headTilt（Z 轴 roll，与 gaze 共享 Head.rotation 决策，超出本次 V1-lookat 小修范围保持原样）
       const tiltAllowed =
         eng.authority.canWrite(
           { bone: head.name, property: "rotation" },
@@ -293,11 +278,23 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
       }
     }
 
-    // 4. VrmBlinkController.update（程序化眨眼）
-    eng.blink.update(eng.vrm, delta);
+    // 4. 表情写入（BlendShape + lean/tilt，canWrite 闸门）
+    eng.expression.update(delta);
 
-    // 5. vrm.update(delta) — 必须调用！驱动 SpringBone、LookAt、约束
+    // 5. 眨眼写入
+    eng.blink.update(delta);
+
+    // 6. VRM 内部 Humanoid / Expression / SpringBone 最终计算
     eng.vrm.update(delta);
+
+    // 7. DEV 模式下按 1 秒间隔做只读稳定性扫描
+    if (import.meta.env.DEV) {
+      stabilityElapsedRef.current += delta;
+      if (stabilityElapsedRef.current >= 1) {
+        stabilityElapsedRef.current = 0;
+        eng.stability.inspect(eng.vrm);
+      }
+    }
   });
 
   if (!vrm || !frame) return null;
