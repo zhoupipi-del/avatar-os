@@ -14,8 +14,8 @@
     "windows": [
       {
         "title": "AvatarOS Kernel",
-        "width": 220,
-        "height": 220,
+        "width": 360,
+        "height": 460,
         "resizable": false,
         "decorations": false,
         "transparent": true,

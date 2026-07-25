@@ -16,10 +16,14 @@
 import type { RigConfig } from "./skins/RiggedGLBSkin";
 import { BAG_CONFIG } from "./skins/RiggedGLBSkin";
 import { AvatarService, type AvatarId } from "@avatar-os/runtime";
+import { VOID_AVATAR_PROFILE } from "./void-avatar-profile";
 
 export interface AvatarProfile {
   id: AvatarId;
-  config: RigConfig;
+  /** GLB 身体的 RigConfig。VRM 格式此字段留 undefined（渲染层按 format 分流）。 */
+  config?: RigConfig;
+  /** 资产格式。"glb" | "vrm" */
+  format?: "glb" | "vrm";
 }
 
 /**
@@ -47,13 +51,19 @@ const WARRIOR_CONFIG: RigConfig = {
 };
 
 /**
- * 稳定目录：id → RigConfig。
- * v0.3.4-B 起含两个身体（bag-character / fantasy-warrior），均经 AvatarService.activate() 平等切换，
- * 不在任何渲染/大脑代码里写 `if(model==="fantasy-warrior")` 特判。
+ * 稳定目录：id → Profile。
+ * v0.3.4-B 起含两个 GLB 身体（bag-character / fantasy-warrior）。
+ * v0.3.7-V1 新增 void-vrm（VRM 格式，AvatarSample_Z）。
+ * 均经 AvatarService.activate() 平等切换，不写特判。
  */
 export const AVATAR_PROFILES: Record<AvatarId, AvatarProfile> = {
-  "bag-character": { id: "bag-character", config: BAG_CONFIG },
-  "fantasy-warrior": { id: "fantasy-warrior", config: WARRIOR_CONFIG },
+  "bag-character": { id: "bag-character", config: BAG_CONFIG, format: "glb" },
+  "fantasy-warrior": { id: "fantasy-warrior", config: WARRIOR_CONFIG, format: "glb" },
+  [VOID_AVATAR_PROFILE.id]: {
+    id: VOID_AVATAR_PROFILE.id,
+    format: "vrm",
+    // VRM 不使用 RigConfig；渲染层按 format 分流到 VoidVrmSkin
+  },
 };
 
 export const DEFAULT_AVATAR_ID: AvatarId = "bag-character";
@@ -63,7 +73,7 @@ export const DEFAULT_AVATAR_ID: AvatarId = "bag-character";
  * 避免激活一个不存在的身体导致渲染崩溃。
  */
 export function resolveAvatarProfile(id: AvatarId): AvatarProfile {
-  return AVATAR_PROFILES[id] ?? AVATAR_PROFILES[DEFAULT_AVATAR_ID];
+  return AVATAR_PROFILES[id] ?? AVATAR_PROFILES[DEFAULT_AVATAR_ID]!;
 }
 
 /**

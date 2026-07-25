@@ -71,7 +71,7 @@ const panelStyle: React.CSSProperties = {
   fontSize: 12,
   zIndex: 9999,
   boxShadow: "0 8px 30px rgba(0,0,0,0.45)",
-  overflow: "hidden",
+  overflowY: "auto",
 };
 
 /** LIVE STATE 单行：label 与 value 分行，纯文本、无颜色、无状态指示灯。 */

@@ -1,16 +1,20 @@
 import { RiggedGLBSkin, BAG_CONFIG, ROBOT_CONFIG, type RigConfig } from "./RiggedGLBSkin";
 import { StandardAvatarSkin } from "./StandardAvatarSkin";
+import { VoidVrmSkin } from "./VoidVrmSkin";
 
 export { RiggedGLBSkin, BAG_CONFIG, ROBOT_CONFIG };
 export { StandardAvatarSkin };
+export { VoidVrmSkin };
 export type { RigConfig };
 
-/** 当前 MVP 默认身体：bag character（真·骨骼 + 动作片段，无脸） */
+/** 当前 MVP 默认身体：bag-character（GLB） */
 export const DEFAULT_SKIN = "bag-character" as const;
 
 /**
  * 皮肤注册表 —— 以后换 VRM / Live2D / 机器人，只加一条配置，Agent 核心不动。
- * 渲染层按 key 取 RigConfig 喂给 StandardAvatarSkin。
+ *
+ * V1 新增: void-vrm (VRM 格式，AvatarSample_Z)
+ * 渲染层按 key 取配置喂给对应 Skin 组件。
  */
 export const SKIN_REGISTRY: Record<string, RigConfig> = {
   "bag-character": BAG_CONFIG,

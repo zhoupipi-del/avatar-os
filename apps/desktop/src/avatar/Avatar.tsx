@@ -26,9 +26,10 @@ import {
   type SystemStatus,
 } from "@avatar-os/morphology";
 import { ThoughtBubble } from "./components/ThoughtBubble";
-import { StandardAvatarSkin } from "./skins/SkinRegistry";
+import { StandardAvatarSkin, VoidVrmSkin } from "./skins/SkinRegistry";
 import { gazeBus } from "./skins/gazeBus";
 import { avatarService, resolveAvatarProfile } from "./avatar-profiles";
+import { VOID_AVATAR_PROFILE } from "./void-avatar-profile";
 import "./Avatar.css";
 
 interface RenderParams {
@@ -54,11 +55,13 @@ const DEFAULT_RENDER: RenderParams = {
 /**
  * 订阅 AvatarService 拿当前激活的 profile id，经 desktop 目录解析为 RigConfig。
  * UI 不持有 active 状态——只观测 AvatarService 并解析资产（事实在 runtime）。
+ *
+ * V1 新增: void-vrm 格式走 VoidVrmSkin（VRM 加载管线），其余走 StandardAvatarSkin（GLB）。
  */
 function useActiveAvatarConfig() {
   const [id, setId] = useState<string>(avatarService.getActiveId());
   useEffect(() => avatarService.subscribe((s) => setId(s.activeId)), []);
-  return resolveAvatarProfile(id).config;
+  return { id, config: resolveAvatarProfile(id).config };
 }
 
 export function Avatar() {
@@ -71,9 +74,9 @@ export function Avatar() {
     limbAngles: { ...REST_LIMB_ANGLES },
   });
   const [render, setRender] = useState<RenderParams>(DEFAULT_RENDER);
-  // 当前激活身体的 RigConfig：经 avatarService(事实源) → avatar-profiles 目录解析。
+  // 当前激活身体：经 avatarService(事实源) → avatar-profiles 目录解析。
   // 不直接写死 BAG_CONFIG，所有权上提到 runtime。
-  const avatarConfig = useActiveAvatarConfig();
+  const { id: activeAvatarId, config: avatarConfig } = useActiveAvatarConfig();
   // 最新渲染参数引用：供 mousemove 闭包读取，避免重注册监听
   const renderRef = useRef<RenderParams>(DEFAULT_RENDER);
 
@@ -385,7 +388,11 @@ export function Avatar() {
     <div className="avatar-root" ref={containerRef}>
       <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
-        <StandardAvatarSkin mood={mood} config={avatarConfig} />
+        {activeAvatarId === VOID_AVATAR_PROFILE.id ? (
+          <VoidVrmSkin mood={mood} />
+        ) : (
+          <StandardAvatarSkin mood={mood} config={avatarConfig} />
+        )}
       </div>
       <button
         className="touch-point"
