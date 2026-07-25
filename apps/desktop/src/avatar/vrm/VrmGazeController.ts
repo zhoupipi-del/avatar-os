@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { VRM } from "@pixiv/three-vrm";
 import { VOID_CALIBRATION } from "../void-calibration";
+import { getVoidMotionSemantic } from "../void-motion-semantics";
 
 type GazeBoneName = "head" | "neck" | "spine";
 
@@ -33,7 +34,12 @@ export class VrmGazeController {
     this.clearBone(vrm, "spine");
   }
 
-  apply(vrm: VRM, gaze: VrmGazeInput, delta: number): void {
+  apply(
+    vrm: VRM,
+    gaze: VrmGazeInput,
+    delta: number,
+    activeMotion?: string | null,
+  ): void {
     if (!VOID_CALIBRATION.features.upperBodyGaze) {
       return;
     }
@@ -43,22 +49,32 @@ export class VrmGazeController {
       0,
       VOID_CALIBRATION.stability.maxDeltaSeconds,
     );
+
     const gx = THREE.MathUtils.clamp(gaze.x / 8, -1, 1);
     const gy = THREE.MathUtils.clamp(gaze.y / 8, -1, 1);
 
-    const targetX = THREE.MathUtils.clamp(
-      -gy * VOID_CALIBRATION.gaze.maxPitch,
-      -VOID_CALIBRATION.gaze.maxPitch,
-      VOID_CALIBRATION.gaze.maxPitch,
-    );
+    const motion = getVoidMotionSemantic(activeMotion);
+    const gazeScale = motion.gazeScale;
 
-    const targetY = THREE.MathUtils.clamp(
-      gx * VOID_CALIBRATION.gaze.maxYaw,
-      -VOID_CALIBRATION.gaze.maxYaw,
-      VOID_CALIBRATION.gaze.maxYaw,
-    );
+    const targetX =
+      THREE.MathUtils.clamp(
+        -gy * VOID_CALIBRATION.gaze.maxPitch,
+        -VOID_CALIBRATION.gaze.maxPitch,
+        VOID_CALIBRATION.gaze.maxPitch,
+      ) * gazeScale;
 
-    const blend = 1 - Math.exp(-safeDelta * VOID_CALIBRATION.gaze.response);
+    const targetY =
+      THREE.MathUtils.clamp(
+        gx * VOID_CALIBRATION.gaze.maxYaw,
+        -VOID_CALIBRATION.gaze.maxYaw,
+        VOID_CALIBRATION.gaze.maxYaw,
+      ) * gazeScale;
+
+    const blend =
+      1 -
+      Math.exp(
+        -safeDelta * VOID_CALIBRATION.gaze.response,
+      );
 
     this.applyBone(vrm, "head", targetX, targetY, blend);
     this.applyBone(vrm, "neck", targetX, targetY, blend);

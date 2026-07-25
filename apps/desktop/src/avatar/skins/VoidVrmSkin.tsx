@@ -13,7 +13,7 @@
  *   → render
  */
 
-import { useEffect, useRef, Suspense, useState } from "react";
+import { useEffect, useRef, Suspense, useState, type MutableRefObject } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
@@ -34,7 +34,8 @@ import { VrmBlinkController } from "../vrm/VrmBlinkController";
 import { VrmExpressionController } from "../vrm/VrmExpressionController";
 import { VrmGazeController } from "../vrm/VrmGazeController";
 import { VrmStabilityGuard } from "../vrm/VrmStabilityGuard";
-import { validateVoidCalibration } from "../void-calibration";
+import { VOID_CALIBRATION, validateVoidCalibration } from "../void-calibration";
+import { getVoidMotionSemantic, validateVoidMotionSemantics } from "../void-motion-semantics";
 import { calculateVisibleMeshFrame, type VrmFrameTransform } from "../vrm/vrm-framing";
 import { VOID_AVATAR_PROFILE } from "../void-avatar-profile";
 import type { SkinProps } from "./types";
@@ -50,6 +51,51 @@ interface VrmEngine {
   stability: VrmStabilityGuard;
 }
 
+function sanitizeFrameDelta(rawDelta: number): number {
+  if (!Number.isFinite(rawDelta) || rawDelta <= 0) {
+    return 0;
+  }
+  return Math.min(rawDelta, VOID_CALIBRATION.stability.maxDeltaSeconds);
+}
+
+function installVoidMotionTracker(
+  animation: {
+    play: (name: string) => void;
+    playOnce: (name: string, onFinished?: () => void) => void;
+  },
+  activeMotionRef: MutableRefObject<string>,
+): void {
+  let sequence = 0;
+
+  const rawPlay = animation.play.bind(animation);
+  const rawPlayOnce = animation.playOnce.bind(animation);
+
+  animation.play = (name: string) => {
+    sequence += 1;
+
+    const semantic = getVoidMotionSemantic(name);
+    activeMotionRef.current = semantic.id;
+
+    rawPlay(name);
+  };
+
+  animation.playOnce = (name: string, onFinished?: () => void) => {
+    sequence += 1;
+    const currentSequence = sequence;
+
+    const semantic = getVoidMotionSemantic(name);
+    activeMotionRef.current = semantic.id;
+
+    rawPlayOnce(name, () => {
+      if (sequence === currentSequence) {
+        activeMotionRef.current = "IDLE";
+      }
+
+      onFinished?.();
+    });
+  };
+}
+
 /**
  * 内部模型组件 —— 挂载 VRM 到 R3F 场景，驱动每帧管线
  */
@@ -58,6 +104,7 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
   const engineRef = useRef<VrmEngine | null>(null);
   const containerRef = useRef<THREE.Group>(null);
   const stabilityElapsedRef = useRef(0);
+  const activeVoidMotionRef = useRef<string>("IDLE");
   const [frame, setFrame] = useState<VrmFrameTransform | null>(null);
 
   // ─── 加载 VRM ───
@@ -93,6 +140,7 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
       // DEV 门控：校验配置合法性（生产构建不跑）
       if (import.meta.env.DEV) {
         validateVoidCalibration();
+        validateVoidMotionSemantics();
       }
 
       // 0. 取景：只按可见网格算包围盒，缩放到 fitHeight 并居中
@@ -153,6 +201,17 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
         } catch (err) {
           console.warn("[VOID] VRMA loading failed, running procedural-only:", err);
         }
+      }
+
+      // 6b. 安装 motion tracker：patch play/playOnce 以跟踪当前 active motion 语义
+      if (animation) {
+        installVoidMotionTracker(animation, activeVoidMotionRef);
+      }
+
+      // 6c. 禁用 VRM 默认 LookAt（避免与 additive gaze overlay 冲突）
+      if (vrm.lookAt) {
+        vrm.lookAt.target = null;
+        vrm.lookAt.autoUpdate = false;
       }
 
       // 7. 行为适配器（意图 → 动画/表情桥接）
@@ -251,7 +310,7 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
     const eng = engineRef.current;
     if (!eng || !eng.vrm) return;
 
-    const delta = eng.stability.sanitizeDelta(rawDelta);
+    const delta = sanitizeFrameDelta(rawDelta);
 
     // 1. 撤销上一帧程序化 LookAt 叠加
     eng.gaze.clear(eng.vrm);
@@ -262,7 +321,7 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
     }
 
     // 3. 在动画姿态之后叠加 Head/Neck/Spine LookAt
-    eng.gaze.apply(eng.vrm, { x: gazeBus.x, y: gazeBus.y }, delta);
+    eng.gaze.apply(eng.vrm, { x: gazeBus.x, y: gazeBus.y }, delta, activeVoidMotionRef.current);
 
     // 3b. headTilt（Z 轴 roll，与 gaze 的 X/Y 不同轴，canWrite 闸门保留）
     const head = eng.vrm.humanoid.getNormalizedBoneNode("head");

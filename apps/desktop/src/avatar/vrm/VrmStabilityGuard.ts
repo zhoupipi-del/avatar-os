@@ -25,7 +25,10 @@ export class VrmStabilityGuard {
 
   inspect(vrm: VRM): VrmStabilityResult {
     if (!import.meta.env.DEV) {
-      return { valid: true, invalidNodes: [] };
+      return {
+        valid: true,
+        invalidNodes: [],
+      };
     }
 
     const invalidNodes: string[] = [];
