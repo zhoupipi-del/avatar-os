@@ -5,7 +5,8 @@
     "dev": "pnpm --filter desktop dev",
     "build": "pnpm --recursive run build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "avatar:fast-demo-gate": "node scripts/avatar/fast-demo-gate.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]
