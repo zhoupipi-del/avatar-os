@@ -45,6 +45,7 @@ import { calculateVisibleMeshFrame, type VrmFrameTransform } from "../vrm/vrm-fr
 import { VOID_AVATAR_PROFILE } from "../void-avatar-profile";
 import type { SkinProps } from "./types";
 import {
+  AgentInputOverlay,
   AgentRuntime,
   RuleBasedBrain,
   type AgentBodyBridge,
@@ -537,9 +538,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
   const [agentSpeech, setAgentSpeech] = useState("");
 
   return (
-    <div
-      style={{ position: "relative", width: "100%", height: "100%" }}
-    >
+    <div className="avatar-vrm-stage">
       <Canvas
         camera={{ position: [0, VOID_AVATAR_PROFILE.fitHeight * 0.3, 5], fov: 35 }}
         gl={{ alpha: true, antialias: true, premultipliedAlpha: false }}
@@ -555,6 +554,12 @@ export function VoidVrmSkin({ mood }: SkinProps) {
       {agentSpeech ? (
         <div className="avatar-agent-speech">{agentSpeech}</div>
       ) : null}
+
+      <AgentInputOverlay
+        onSubmit={async (text) => {
+          await window.__avatarOSAgent?.receiveText(text);
+        }}
+      />
     </div>
   );
 }
