@@ -1,74 +1,151 @@
 import type { LlmProvider } from "./llm-provider";
 
 export interface OllamaProviderOptions {
-  /** Ollama 服务地址，默认 http://127.0.0.1:11434 */
   readonly baseUrl?: string;
-  /** 模型名，默认 qwen2.5:7b；可改 qwen2.5:14b */
   readonly model?: string;
-  /** 可注入的 fetch 实现（测试用；默认全局 fetch） */
+  readonly timeoutMs?: number;
   readonly fetchImpl?: typeof fetch;
 }
 
 interface OllamaChatResponse {
-  message?: {
-    content?: string;
+  readonly message?: {
+    readonly role?: string;
+    readonly content?: string;
   };
+  readonly response?: string;
+  readonly done?: boolean;
 }
 
-/**
- * OllamaProvider —— 本地 Ollama 供应商（Day2 默认）
- *
- * 走 /api/chat（非流式），只取 message.content。
- * 不接 OpenAI / TTS / LipSync / Memory / Relationship。
- */
 export class OllamaProvider implements LlmProvider {
   readonly name = "ollama";
+
   private readonly baseUrl: string;
   private readonly model: string;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: OllamaProviderOptions = {}) {
-    this.baseUrl = options.baseUrl ?? "http://127.0.0.1:11434";
-    this.model = options.model ?? "qwen2.5:7b";
+    this.baseUrl = normalizeBaseUrl(
+      options.baseUrl ?? "http://127.0.0.1:11434",
+    );
+    this.model = options.model?.trim() || "qwen2.5:7b";
+    this.timeoutMs = normalizeTimeoutMs(options.timeoutMs);
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
   async isAvailable(): Promise<boolean> {
     try {
-      const res = await this.fetchImpl(`${this.baseUrl}/api/tags`, {
-        method: "GET",
-      });
-      return res.ok;
+      const response = await this.fetchWithTimeout(
+        `${this.baseUrl}/api/tags`,
+        {
+          method: "GET",
+        },
+        Math.min(this.timeoutMs, 3000),
+      );
+
+      return response.ok;
     } catch {
       return false;
     }
   }
 
+  // 与 LlmProvider 接口 + JsonLlmBrain 调用保持一致：接收 systemPrompt 与 userText 两参，
+  // 分别放入 system / user 角色，确保 JSON 格式指令与用户真实问题都送达。
   async complete(systemPrompt: string, userText: string): Promise<string> {
-    const res = await this.fetchImpl(`${this.baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userText },
-        ],
-        stream: false,
-      }),
-    });
+    const response = await this.fetchWithTimeout(
+      `${this.baseUrl}/api/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.model,
+          stream: false,
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            {
+              role: "user",
+              content: userText,
+            },
+          ],
+          options: {
+            temperature: 0.2,
+            num_predict: 256,
+          },
+        }),
+      },
+      this.timeoutMs,
+    );
 
-    if (!res.ok) {
-      throw new Error(`Ollama HTTP ${res.status}`);
+    if (!response.ok) {
+      throw new Error(
+        `Ollama request failed: ${response.status} ${response.statusText}`,
+      );
     }
 
-    const data = (await res.json()) as OllamaChatResponse;
-    const content = data?.message?.content;
+    const data = (await response.json()) as OllamaChatResponse;
+    const content = data.message?.content ?? data.response ?? "";
 
-    if (typeof content !== "string") {
-      throw new Error("Ollama response missing message.content");
+    if (!content.trim()) {
+      throw new Error("Ollama returned empty content.");
     }
 
     return content;
   }
+
+  getDebugConfig(): {
+    readonly baseUrl: string;
+    readonly model: string;
+    readonly timeoutMs: number;
+  } {
+    return {
+      baseUrl: this.baseUrl,
+      model: this.model,
+      timeoutMs: this.timeoutMs,
+    };
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      return await this.fetchImpl(url, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
+  }
+}
+
+function normalizeBaseUrl(value: string): string {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return "http://127.0.0.1:11434";
+  }
+
+  return trimmed.replace(/\/$/, "");
+}
+
+function normalizeTimeoutMs(value: unknown): number {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 60000;
+  }
+
+  return Math.max(1000, Math.floor(parsed));
 }
