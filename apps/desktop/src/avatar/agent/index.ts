@@ -3,3 +3,7 @@ export * from "./brain-json-parser";
 export * from "./rule-based-brain";
 export * from "./agent-runtime";
 export * from "./AgentInputOverlay";
+export * from "./llm-provider";
+export * from "./ollama-provider";
+export * from "./json-llm-brain";
+export * from "./brain-factory";

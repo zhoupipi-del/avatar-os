@@ -47,7 +47,7 @@ import type { SkinProps } from "./types";
 import {
   AgentInputOverlay,
   AgentRuntime,
-  RuleBasedBrain,
+  createDefaultDemoBrain,
   type AgentBodyBridge,
   type AgentEmotion,
   type AgentIntent,
@@ -410,7 +410,7 @@ function VoidModel({
 
       // 7b. Text-only Agent Runtime 接线（v0.3.8-fast）
       const agentBody = createVoidAgentBodyBridge(engine, onAgentSpeech);
-      const agentRuntime = new AgentRuntime(new RuleBasedBrain(), agentBody);
+      const agentRuntime = new AgentRuntime(createDefaultDemoBrain(), agentBody);
       engine.agentRuntime = agentRuntime;
       window.__avatarOSAgent = {
         receiveText(text: string) {

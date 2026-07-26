@@ -64,7 +64,7 @@ export function parseBrainJsonOutput(
   }
 }
 
-function extractFirstJsonObject(text: string): string | null {
+export function extractFirstJsonObject(text: string): string | null {
   const start = text.indexOf("{");
 
   if (start < 0) {
