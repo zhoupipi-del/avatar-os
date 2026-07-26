@@ -36,9 +36,31 @@ import { VrmGazeController } from "../vrm/VrmGazeController";
 import { VrmStabilityGuard } from "../vrm/VrmStabilityGuard";
 import { VOID_CALIBRATION, validateVoidCalibration } from "../void-calibration";
 import { getVoidMotionSemantic, validateVoidMotionSemantics } from "../void-motion-semantics";
+import {
+  validateVoidV2RuntimeGate,
+  assertVoidV2RuntimeGate,
+  formatVoidV2GateResult,
+} from "../void-v2-stability-gate";
 import { calculateVisibleMeshFrame, type VrmFrameTransform } from "../vrm/vrm-framing";
 import { VOID_AVATAR_PROFILE } from "../void-avatar-profile";
 import type { SkinProps } from "./types";
+import {
+  AgentRuntime,
+  RuleBasedBrain,
+  type AgentBodyBridge,
+  type AgentEmotion,
+  type AgentIntent,
+} from "../agent";
+
+declare global {
+  interface Window {
+    __avatarOSAgent?: {
+      receiveText(text: string): Promise<unknown>;
+      interrupt(): void;
+      snapshot(): unknown;
+    };
+  }
+}
 
 interface VrmEngine {
   vrm: import("@pixiv/three-vrm").VRM;
@@ -49,6 +71,7 @@ interface VrmEngine {
   authority: BodyChannelAuthority;
   gaze: VrmGazeController;
   stability: VrmStabilityGuard;
+  agentRuntime?: AgentRuntime;
 }
 
 function sanitizeFrameDelta(rawDelta: number): number {
@@ -97,9 +120,112 @@ function installVoidMotionTracker(
 }
 
 /**
+ * 从 profile actions 配置中提取已定义（非 undefined）的动作名。
+ * 仅传真实可提炼的运行时数据给 Gate，不伪造 body ids。
+ */
+function getVoidActionNames(
+  actions: Partial<Record<string, string>>,
+): string[] {
+  return Object.entries(actions)
+    .filter(([, url]) => url !== undefined)
+    .map(([name]) => name);
+}
+
+/**
+ * v0.3.8-fast：把 AgentRuntime 的抽象 BodyBridge 接到 VOID 真实控制器。
+ * 情绪 → VrmExpressionController 具名预设（happy/sad/thinking/drowsy/idle）；
+ * 意图 → AnimationManager 的 VRMA clip（GREET/PEEK/THINKING/...）。
+ * 不改 Scheduler 核心规则，只走现有 play/playOnce 通道。
+ */
+function createVoidAgentBodyBridge(
+  eng: VrmEngine,
+  setAgentSpeech: (text: string) => void,
+): AgentBodyBridge {
+  return {
+    speakText(text: string): void {
+      setAgentSpeech(text);
+    },
+
+    setEmotion(emotion: AgentEmotion): void {
+      if (!eng.expression) {
+        return;
+      }
+
+      switch (emotion.type) {
+        case "happy":
+          eng.expression.happy();
+          return;
+        case "sad":
+          eng.expression.sad();
+          return;
+        case "thinking":
+        case "curious":
+          eng.expression.thinking();
+          return;
+        case "tired":
+          eng.expression.drowsy();
+          return;
+        case "neutral":
+        default:
+          eng.expression.idle();
+      }
+    },
+
+    playIntent(intent: AgentIntent): void {
+      if (!eng.animation) {
+        return;
+      }
+
+      switch (intent.type) {
+        case "GREET":
+          eng.animation.playOnce("GREET");
+          return;
+        case "GREET_ALT":
+          eng.animation.playOnce("GREET_ALT");
+          return;
+        case "PEEK":
+          eng.animation.playOnce("PEEK");
+          return;
+        case "THINKING":
+          eng.animation.playOnce("THINKING");
+          return;
+        case "BOUNCE_HAPPY":
+          eng.animation.playOnce("BOUNCE_HAPPY");
+          return;
+        case "HAPPY_IDLE":
+          eng.animation.play("HAPPY_IDLE");
+          return;
+        case "SAD_BODY":
+        case "COMFORT":
+          eng.animation.playOnce("SAD_BODY");
+          return;
+        case "IDLE":
+          eng.animation.play("IDLE");
+          return;
+        case "SPEAK":
+        case "LISTEN":
+        case "NONE":
+        default:
+          return;
+      }
+    },
+
+    stop(): void {
+      eng.animation?.play("IDLE");
+    },
+  };
+}
+
+/**
  * 内部模型组件 —— 挂载 VRM 到 R3F 场景，驱动每帧管线
  */
-function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
+function VoidModel({
+  mood,
+  onAgentSpeech,
+}: {
+  mood: SkinProps["mood"];
+  onAgentSpeech: (text: string) => void;
+}) {
   const [vrm, setVrm] = useState<import("@pixiv/three-vrm").VRM | null>(null);
   const engineRef = useRef<VrmEngine | null>(null);
   const containerRef = useRef<THREE.Group>(null);
@@ -281,6 +407,35 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
       };
       engineRef.current = engine;
 
+      // 7b. Text-only Agent Runtime 接线（v0.3.8-fast）
+      const agentBody = createVoidAgentBodyBridge(engine, onAgentSpeech);
+      const agentRuntime = new AgentRuntime(new RuleBasedBrain(), agentBody);
+      engine.agentRuntime = agentRuntime;
+      window.__avatarOSAgent = {
+        receiveText(text: string) {
+          return agentRuntime.receiveText(text);
+        },
+        interrupt() {
+          agentRuntime.interrupt();
+        },
+        snapshot() {
+          return agentRuntime.snapshot();
+        },
+      };
+
+      // 8. DEV-only V2 Stability Gate（只传真实可提炼项，不伪造 body ids）
+      if (import.meta.env.DEV) {
+        const gateInput = {
+          vrm,
+          actionNames: getVoidActionNames(actionUrls),
+        } as const;
+        const gateResult = validateVoidV2RuntimeGate(gateInput);
+        if (!gateResult.passed) {
+          console.error(formatVoidV2GateResult(gateResult));
+          assertVoidV2RuntimeGate(gateInput);
+        }
+      }
+
       bridge.connect();
 
       // 播放默认 idle（如果有 VRMA）
@@ -302,6 +457,7 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
         disposeVrm(eng.vrm);
       }
       engineRef.current = null;
+      delete window.__avatarOSAgent;
     };
   }, [vrm]);
 
@@ -378,18 +534,27 @@ function VoidModel({ mood }: { mood: SkinProps["mood"] }) {
  * VOID VRM 皮肤入口 —— 与 StandardAvatarSkin 同级，供 Avatar.tsx 按格式选择渲染
  */
 export function VoidVrmSkin({ mood }: SkinProps) {
+  const [agentSpeech, setAgentSpeech] = useState("");
+
   return (
-    <Canvas
-      camera={{ position: [0, VOID_AVATAR_PROFILE.fitHeight * 0.3, 5], fov: 35 }}
-      gl={{ alpha: true, antialias: true, premultipliedAlpha: false }}
-      style={{ width: "100%", height: "100%", background: "transparent" }}
+    <div
+      style={{ position: "relative", width: "100%", height: "100%" }}
     >
-      <ambientLight intensity={0.8} />
-      <directionalLight position={[3, 5, 4]} intensity={1.3} />
-      <directionalLight position={[-3, 2, -2]} intensity={0.45} />
-      <Suspense fallback={null}>
-        <VoidModel mood={mood} />
-      </Suspense>
-    </Canvas>
+      <Canvas
+        camera={{ position: [0, VOID_AVATAR_PROFILE.fitHeight * 0.3, 5], fov: 35 }}
+        gl={{ alpha: true, antialias: true, premultipliedAlpha: false }}
+        style={{ width: "100%", height: "100%", background: "transparent" }}
+      >
+        <ambientLight intensity={0.8} />
+        <directionalLight position={[3, 5, 4]} intensity={1.3} />
+        <directionalLight position={[-3, 2, -2]} intensity={0.45} />
+        <Suspense fallback={null}>
+          <VoidModel mood={mood} onAgentSpeech={setAgentSpeech} />
+        </Suspense>
+      </Canvas>
+      {agentSpeech ? (
+        <div className="avatar-agent-speech">{agentSpeech}</div>
+      ) : null}
+    </div>
   );
 }
