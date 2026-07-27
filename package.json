@@ -8,7 +8,8 @@
     "test:watch": "vitest",
     "avatar:fast-demo-gate": "node scripts/avatar/fast-demo-gate.mjs",
     "avatar:voice-demo-gate": "node scripts/avatar/voice-demo-gate.mjs",
-    "avatar:lip-sync-harness-gate": "node scripts/avatar/lip-sync-harness-gate.mjs"
+    "avatar:lip-sync-harness-gate": "node scripts/avatar/lip-sync-harness-gate.mjs",
+    "avatar:lip-sync-rhythm-gate": "node scripts/avatar/lip-sync-rhythm-gate.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]

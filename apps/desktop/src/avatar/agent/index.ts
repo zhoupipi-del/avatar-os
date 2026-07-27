@@ -12,3 +12,4 @@ export * from "./voice-control-state";
 export * from "./VoiceControlOverlay";
 export * from "./vrm-lip-shape-probe";
 export * from "./lip-sync-noop-harness";
+export * from "./lip-sync-text-rhythm";

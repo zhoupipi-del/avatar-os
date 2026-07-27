@@ -49,6 +49,7 @@ import {
   AgentRuntime,
   BrowserTtsController,
   LipSyncNoopHarness,
+  LipSyncTextRhythmDriver,
   VoiceControlOverlay,
   createDefaultDemoBrain,
   probeLipShapes,
@@ -57,6 +58,7 @@ import {
   type AgentIntent,
   type LipShapeProbeResult,
   type LipSyncNoopStatus,
+  type LipSyncRhythmStatus,
 } from "../agent";
 
 declare global {
@@ -82,6 +84,7 @@ interface VrmEngine {
   tts?: BrowserTtsController;
   lipShapeProbe?: LipShapeProbeResult;
   lipSyncNoop?: LipSyncNoopHarness;
+  lipSyncRhythm?: LipSyncTextRhythmDriver;
 }
 
 function sanitizeFrameDelta(rawDelta: number): number {
@@ -152,12 +155,14 @@ function createVoidAgentBodyBridge(
   setAgentSpeech: (text: string) => void,
   tts?: BrowserTtsController,
   lipSyncNoop?: LipSyncNoopHarness,
+  lipSyncRhythm?: LipSyncTextRhythmDriver,
 ): AgentBodyBridge {
   return {
     speakText(text: string): void {
       setAgentSpeech(text);
       tts?.speak(text);
       lipSyncNoop?.notifySpeechText(text);
+      lipSyncRhythm?.startText(text);
     },
 
     setEmotion(emotion: AgentEmotion): void {
@@ -227,6 +232,7 @@ function createVoidAgentBodyBridge(
     stop(): void {
       tts?.cancel();
       lipSyncNoop?.cancel();
+      lipSyncRhythm?.cancel();
       eng.animation?.play("IDLE");
     },
   };
@@ -241,12 +247,14 @@ function VoidModel({
   onTtsChange,
   onLipProbeChange,
   onLipSyncStatusChange,
+  onRhythmStatusChange,
 }: {
   mood: SkinProps["mood"];
   onAgentSpeech: (text: string) => void;
   onTtsChange?: (tts: BrowserTtsController | null) => void;
   onLipProbeChange?: (result: LipShapeProbeResult | null) => void;
   onLipSyncStatusChange?: (status: LipSyncNoopStatus | null) => void;
+  onRhythmStatusChange?: (status: LipSyncRhythmStatus | null) => void;
 }) {
   const [vrm, setVrm] = useState<import("@pixiv/three-vrm").VRM | null>(null);
   const engineRef = useRef<VrmEngine | null>(null);
@@ -455,7 +463,18 @@ function VoidModel({
         });
       }
 
-      const agentBody = createVoidAgentBodyBridge(engine, onAgentSpeech, tts, lipSyncNoop);
+      // 7d. Day8 Text Rhythm State Driver：把 speech 文本转成可观察节奏状态，
+      //     仍不写 VRM expression、不驱动嘴型、不接音频、不做 VisemeFrame。
+      const lipSyncRhythm = new LipSyncTextRhythmDriver();
+      engine.lipSyncRhythm = lipSyncRhythm;
+
+      const agentBody = createVoidAgentBodyBridge(
+        engine,
+        onAgentSpeech,
+        tts,
+        lipSyncNoop,
+        lipSyncRhythm,
+      );
       const agentRuntime = new AgentRuntime(createDefaultDemoBrain(), agentBody);
       engine.agentRuntime = agentRuntime;
       window.__avatarOSAgent = {
@@ -501,6 +520,7 @@ function VoidModel({
       if (eng) {
         eng.tts?.dispose();
         eng.lipSyncNoop?.cancel();
+        eng.lipSyncRhythm?.cancel();
         eng.bridge.disconnect();
         eng.gaze.dispose(eng.vrm);
         disposeVrm(eng.vrm);
@@ -509,11 +529,12 @@ function VoidModel({
       onTtsChange?.(null);
       onLipProbeChange?.(null);
       onLipSyncStatusChange?.(null);
+      onRhythmStatusChange?.(null);
       delete window.__avatarOSAgent;
     };
   }, [vrm]);
 
-  // ─── Day7 LipSync 状态轮询（500ms，只读 getStatus，不驱动嘴型） ───
+  // ─── Day7/Day8 LipSync 状态轮询（500ms，只读 getStatus，不驱动嘴型） ───
   useEffect(() => {
     const interval = window.setInterval(() => {
       const eng = engineRef.current;
@@ -523,10 +544,17 @@ function VoidModel({
       } else {
         onLipSyncStatusChange?.(null);
       }
+
+      if (eng?.lipSyncRhythm) {
+        eng.lipSyncRhythm.update();
+        onRhythmStatusChange?.(eng.lipSyncRhythm.getStatus());
+      } else {
+        onRhythmStatusChange?.(null);
+      }
     }, 500);
 
     return () => window.clearInterval(interval);
-  }, [onLipSyncStatusChange]);
+  }, [onLipSyncStatusChange, onRhythmStatusChange]);
 
   // ─── 每帧管线（V2 Final Calibration 锁定顺序） ───
   useFrame((_, rawDelta) => {
@@ -605,6 +633,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
   const [tts, setTts] = useState<BrowserTtsController | null>(null);
   const [lipProbe, setLipProbe] = useState<LipShapeProbeResult | null>(null);
   const [lipSyncStatus, setLipSyncStatus] = useState<LipSyncNoopStatus | null>(null);
+  const [rhythmStatus, setRhythmStatus] = useState<LipSyncRhythmStatus | null>(null);
 
   return (
     <div className="avatar-vrm-stage">
@@ -623,6 +652,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
             onTtsChange={setTts}
             onLipProbeChange={setLipProbe}
             onLipSyncStatusChange={setLipSyncStatus}
+            onRhythmStatusChange={setRhythmStatus}
           />
         </Suspense>
       </Canvas>
@@ -648,6 +678,23 @@ export function VoidVrmSkin({ mood }: SkinProps) {
             {lipSyncStatus.availableShapes.length > 0
               ? lipSyncStatus.availableShapes.join(", ")
               : "none"}
+          </div>
+        </div>
+      ) : null}
+
+      {rhythmStatus ? (
+        <div className="avatar-lip-rhythm-status">
+          <div>
+            Rhythm: <strong>{rhythmStatus.phase}</strong>
+            {rhythmStatus.active ? (
+              <span className="avatar-lip-rhythm-status__dot"> ●</span>
+            ) : null}
+          </div>
+          <div>
+            progress: {(rhythmStatus.progress * 100).toFixed(0)}%
+          </div>
+          <div>
+            intensity: {rhythmStatus.intensity.toFixed(2)}
           </div>
         </div>
       ) : null}
