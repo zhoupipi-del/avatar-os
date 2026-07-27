@@ -51,6 +51,7 @@ import {
   LipSyncNoopHarness,
   LipSyncTextRhythmDriver,
   TextVisemeExpressionDriver,
+  LipSyncControlOverlay,
   VoiceControlOverlay,
   createDefaultDemoBrain,
   probeLipShapes,
@@ -255,6 +256,7 @@ function VoidModel({
   onLipSyncStatusChange,
   onRhythmStatusChange,
   onTextVisemeStatusChange,
+  engineRef,
 }: {
   mood: SkinProps["mood"];
   onAgentSpeech: (text: string) => void;
@@ -263,9 +265,9 @@ function VoidModel({
   onLipSyncStatusChange?: (status: LipSyncNoopStatus | null) => void;
   onRhythmStatusChange?: (status: LipSyncRhythmStatus | null) => void;
   onTextVisemeStatusChange?: (status: TextVisemeExpressionDriverStatus | null) => void;
+  engineRef: MutableRefObject<VrmEngine | null>;
 }) {
   const [vrm, setVrm] = useState<import("@pixiv/three-vrm").VRM | null>(null);
-  const engineRef = useRef<VrmEngine | null>(null);
   const containerRef = useRef<THREE.Group>(null);
   const stabilityElapsedRef = useRef(0);
   const activeVoidMotionRef = useRef<string>("IDLE");
@@ -668,6 +670,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
   const [lipSyncStatus, setLipSyncStatus] = useState<LipSyncNoopStatus | null>(null);
   const [rhythmStatus, setRhythmStatus] = useState<LipSyncRhythmStatus | null>(null);
   const [textVisemeStatus, setTextVisemeStatus] = useState<TextVisemeExpressionDriverStatus | null>(null);
+  const engineRef = useRef<VrmEngine | null>(null);
 
   return (
     <div className="avatar-vrm-stage">
@@ -688,6 +691,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
             onLipSyncStatusChange={setLipSyncStatus}
             onRhythmStatusChange={setRhythmStatus}
             onTextVisemeStatusChange={setTextVisemeStatus}
+            engineRef={engineRef}
           />
         </Suspense>
       </Canvas>
@@ -702,6 +706,12 @@ export function VoidVrmSkin({ mood }: SkinProps) {
       />
 
       <VoiceControlOverlay tts={tts} lipProbe={lipProbe} />
+      <LipSyncControlOverlay
+        driver={engineRef.current?.textVisemeExpression ?? null}
+        getManager={() => engineRef.current?.vrm?.expressionManager ?? null}
+        status={textVisemeStatus}
+        lipProbe={lipProbe}
+      />
 
       {lipSyncStatus ? (
         <div className="avatar-lip-sync-status">

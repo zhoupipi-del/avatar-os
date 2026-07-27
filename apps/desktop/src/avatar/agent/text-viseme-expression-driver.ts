@@ -1,6 +1,7 @@
 import {
   LipSyncExpressionWriter,
   type LipSyncExpressionManagerLike,
+  type LipSyncExpressionWriterOptions,
   type LipSyncExpressionWriterStatus,
 } from "./lip-sync-expression-writer";
 import {
@@ -53,6 +54,23 @@ export class TextVisemeExpressionDriver {
     manager?: LipSyncExpressionManagerLike | null,
   ): void {
     this.writer.setProbeAvailable(available, manager);
+  }
+
+  /** 运行时调整嘴型强度 / 平滑度，转发给 writer（不触发归零、不写 expression）。 */
+  setOptions(options: Partial<LipSyncExpressionWriterOptions>): void {
+    this.writer.setOptions(options);
+  }
+
+  getOptions(): {
+    enabled: boolean;
+    cap: number;
+    attack: number;
+    release: number;
+  } {
+    return {
+      enabled: this.enabled,
+      ...this.writer.getOptions(),
+    };
   }
 
   startText(text: string): void {

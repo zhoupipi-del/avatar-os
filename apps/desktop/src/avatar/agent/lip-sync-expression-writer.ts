@@ -28,14 +28,17 @@ export interface LipSyncExpressionWriterStatus {
   readonly resetCount: number;
   readonly lastError: string | null;
   readonly weights: Readonly<Record<MouthShape, number>>;
+  readonly cap: number;
+  readonly attack: number;
+  readonly release: number;
 }
 
 export class LipSyncExpressionWriter {
   private enabled: boolean;
   private probeAvailable = false;
-  private readonly cap: number;
-  private readonly attack: number;
-  private readonly release: number;
+  private cap: number;
+  private attack: number;
+  private release: number;
 
   private resetCount = 0;
   private lastError: string | null = null;
@@ -73,13 +76,44 @@ export class LipSyncExpressionWriter {
     }
   }
 
+  /** 运行时调整嘴型强度 / 平滑度（不触发归零、不写 expression）。 */
+  setOptions(options: Partial<LipSyncExpressionWriterOptions>): void {
+    if (typeof options.cap === "number") {
+      this.cap = clampNumber(options.cap, 0, 1);
+    }
+
+    if (typeof options.attack === "number") {
+      this.attack = clampNumber(options.attack, 1, 200);
+    }
+
+    if (typeof options.release === "number") {
+      this.release = clampNumber(options.release, 1, 200);
+    }
+  }
+
+  getOptions(): { cap: number; attack: number; release: number } {
+    return {
+      cap: this.cap,
+      attack: this.attack,
+      release: this.release,
+    };
+  }
+
   applyFrame(
     manager: LipSyncExpressionManagerLike | null | undefined,
     frame: TextVisemeFrame,
     delta = 0.016,
   ): void {
-    if (!manager || !this.enabled || !this.probeAvailable || !frame.active) {
-      this.resetAll(manager);
+    const needsReset =
+      !manager || !this.enabled || !this.probeAvailable || !frame.active;
+
+    if (needsReset) {
+      // 仅在之前确实写过口型时才归零一次，避免 probe missing / 未启用时
+      // 每帧无谓地 resetAll（旧逻辑会让 resetCount 按 60fps 疯涨）。
+      if (this.hasNonZeroWeights()) {
+        this.resetAll(manager);
+      }
+
       return;
     }
 
@@ -119,7 +153,14 @@ export class LipSyncExpressionWriter {
       resetCount: this.resetCount,
       lastError: this.lastError,
       weights: { ...this.smoothState },
+      cap: this.cap,
+      attack: this.attack,
+      release: this.release,
     };
+  }
+
+  private hasNonZeroWeights(): boolean {
+    return LIP_SYNC_MOUTH_SHAPES.some((shape) => this.smoothState[shape] > 0.001);
   }
 
   private buildTarget(frame: TextVisemeFrame): Record<MouthShape, number> {

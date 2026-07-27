@@ -10,7 +10,8 @@
     "avatar:voice-demo-gate": "node scripts/avatar/voice-demo-gate.mjs",
     "avatar:lip-sync-harness-gate": "node scripts/avatar/lip-sync-harness-gate.mjs",
     "avatar:lip-sync-rhythm-gate": "node scripts/avatar/lip-sync-rhythm-gate.mjs",
-    "avatar:text-viseme-expression-gate": "node scripts/avatar/text-viseme-expression-gate.mjs"
+    "avatar:text-viseme-expression-gate": "node scripts/avatar/text-viseme-expression-gate.mjs",
+    "avatar:lip-sync-controls-gate": "node scripts/avatar/lip-sync-controls-gate.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]
