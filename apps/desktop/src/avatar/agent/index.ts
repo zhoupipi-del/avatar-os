@@ -11,3 +11,4 @@ export * from "./browser-tts-controller";
 export * from "./voice-control-state";
 export * from "./VoiceControlOverlay";
 export * from "./vrm-lip-shape-probe";
+export * from "./lip-sync-noop-harness";

@@ -481,3 +481,28 @@
   padding-top: 4px;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
+
+/* ============================================================
+   LipSync No-op Harness (Day7)
+   只读安全壳状态：armed / no-op / speaking-text；不驱动嘴型
+   ============================================================ */
+.avatar-lip-sync-status {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 150px;
+  z-index: 22;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(16, 18, 28, 0.7);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.avatar-lip-sync-status strong {
+  color: rgba(255, 255, 255, 0.96);
+}
