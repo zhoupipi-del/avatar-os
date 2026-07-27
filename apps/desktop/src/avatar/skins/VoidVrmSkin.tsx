@@ -49,6 +49,7 @@ import {
   AgentRuntime,
   BrowserTtsController,
   createDefaultDemoBrain,
+  VoiceControlOverlay,
   type AgentBodyBridge,
   type AgentEmotion,
   type AgentIntent,
@@ -228,9 +229,11 @@ function createVoidAgentBodyBridge(
 function VoidModel({
   mood,
   onAgentSpeech,
+  onTtsChange,
 }: {
   mood: SkinProps["mood"];
   onAgentSpeech: (text: string) => void;
+  onTtsChange?: (tts: BrowserTtsController | null) => void;
 }) {
   const [vrm, setVrm] = useState<import("@pixiv/three-vrm").VRM | null>(null);
   const engineRef = useRef<VrmEngine | null>(null);
@@ -421,6 +424,7 @@ function VoidModel({
         volume: 1,
       });
       engine.tts = tts;
+      onTtsChange?.(tts);
       const agentBody = createVoidAgentBodyBridge(engine, onAgentSpeech, tts);
       const agentRuntime = new AgentRuntime(createDefaultDemoBrain(), agentBody);
       engine.agentRuntime = agentRuntime;
@@ -471,6 +475,7 @@ function VoidModel({
         disposeVrm(eng.vrm);
       }
       engineRef.current = null;
+      onTtsChange?.(null);
       delete window.__avatarOSAgent;
     };
   }, [vrm]);
@@ -549,6 +554,7 @@ function VoidModel({
  */
 export function VoidVrmSkin({ mood }: SkinProps) {
   const [agentSpeech, setAgentSpeech] = useState("");
+  const [tts, setTts] = useState<BrowserTtsController | null>(null);
 
   return (
     <div className="avatar-vrm-stage">
@@ -561,7 +567,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
         <directionalLight position={[3, 5, 4]} intensity={1.3} />
         <directionalLight position={[-3, 2, -2]} intensity={0.45} />
         <Suspense fallback={null}>
-          <VoidModel mood={mood} onAgentSpeech={setAgentSpeech} />
+          <VoidModel mood={mood} onAgentSpeech={setAgentSpeech} onTtsChange={setTts} />
         </Suspense>
       </Canvas>
       {agentSpeech ? (
@@ -573,6 +579,8 @@ export function VoidVrmSkin({ mood }: SkinProps) {
           await window.__avatarOSAgent?.receiveText(text);
         }}
       />
+
+      <VoiceControlOverlay tts={tts} />
     </div>
   );
 }

@@ -8,3 +8,5 @@ export * from "./ollama-provider";
 export * from "./json-llm-brain";
 export * from "./brain-factory";
 export * from "./browser-tts-controller";
+export * from "./voice-control-state";
+export * from "./VoiceControlOverlay";

@@ -389,3 +389,89 @@
   opacity: 0.55;
   cursor: default;
 }
+
+/* ============================================================
+   Voice Controls (Day5)
+   窗口底部语音控制面板：开关 / 音量 / 语速 / 音调 / 停止 / 状态
+   ============================================================ */
+.avatar-voice-control {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 92px;
+  z-index: 22;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(18, 18, 24, 0.78);
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 12px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+
+.avatar-voice-control__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar-voice-control__head {
+  justify-content: space-between;
+}
+
+.avatar-voice-control__switch,
+.avatar-voice-control__slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.avatar-voice-control__switch input {
+  width: 14px;
+  height: 14px;
+}
+
+.avatar-voice-control__label {
+  white-space: nowrap;
+}
+
+.avatar-voice-control__slider input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: rgba(255, 255, 255, 0.88);
+}
+
+.avatar-voice-control__stop {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(244, 114, 182, 0.92);
+  color: rgba(20, 20, 26, 0.96);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.avatar-voice-control__stop:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.avatar-voice-control__debug {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.78);
+}

@@ -16,6 +16,9 @@ const REQUIRED_FILES = [
   "apps/desktop/src/avatar/agent/AgentInputOverlay.tsx",
   "apps/desktop/src/avatar/agent/browser-tts-controller.ts",
   "apps/desktop/src/avatar/agent/browser-tts-controller.test.ts",
+  "apps/desktop/src/avatar/agent/voice-control-state.ts",
+  "apps/desktop/src/avatar/agent/voice-control-state.test.ts",
+  "apps/desktop/src/avatar/agent/VoiceControlOverlay.tsx",
   "apps/desktop/src/avatar/agent/json-llm-brain.ts",
   "apps/desktop/src/avatar/agent/brain-factory.ts",
   "apps/desktop/src/avatar/skins/VoidVrmSkin.tsx",
@@ -195,6 +198,24 @@ assertContains(
   "apps/desktop/src/avatar/skins/VoidVrmSkin.tsx",
   /\.cancel\(\)/,
   "BodyBridge cancels TTS on stop",
+);
+
+assertContains(
+  "apps/desktop/src/avatar/agent/VoiceControlOverlay.tsx",
+  /VoiceControlOverlay/,
+  "Voice control overlay component exists",
+);
+
+assertContains(
+  "apps/desktop/src/avatar/agent/browser-tts-controller.ts",
+  /setEnabled\(/,
+  "Browser TTS supports setEnabled",
+);
+
+assertContains(
+  "apps/desktop/src/avatar/agent/browser-tts-controller.ts",
+  /setOptions\(/,
+  "Browser TTS supports setOptions",
 );
 
 assertNoForbiddenFeatureFiles();

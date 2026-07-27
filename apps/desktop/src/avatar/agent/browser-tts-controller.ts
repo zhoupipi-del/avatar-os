@@ -21,11 +21,11 @@ type SpeechSynthesisUtteranceConstructor =
   new (text: string) => SpeechSynthesisUtterance;
 
 export class BrowserTtsController {
-  private readonly enabled: boolean;
+  private enabled: boolean;
   private readonly lang: string;
-  private readonly rate: number;
-  private readonly pitch: number;
-  private readonly volume: number;
+  private rate: number;
+  private pitch: number;
+  private volume: number;
   private readonly synth: SpeechSynthesis | null;
   private readonly utteranceCtor: SpeechSynthesisUtteranceConstructor | null;
 
@@ -92,6 +92,26 @@ export class BrowserTtsController {
 
   dispose(): void {
     this.cancel();
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+  }
+
+  setOptions(
+    options: Partial<
+      Pick<BrowserTtsControllerOptions, "rate" | "pitch" | "volume">
+    >,
+  ): void {
+    if (typeof options.rate === "number") {
+      this.rate = normalizeRange(options.rate, 0.1, 10);
+    }
+    if (typeof options.pitch === "number") {
+      this.pitch = normalizeRange(options.pitch, 0, 2);
+    }
+    if (typeof options.volume === "number") {
+      this.volume = normalizeRange(options.volume, 0, 1);
+    }
   }
 
   getStatus(): BrowserTtsStatus {
