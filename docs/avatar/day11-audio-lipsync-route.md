@@ -81,3 +81,48 @@ Day11A **不替换** BrowserTtsController，也**不接**真实音频，只做�
 - ❌ 不写 AudioContext 实现（Day11A 阶段）。
 - ❌ 不驱动 expression（Day11A 阶段；口型仍由 Day9 文本 viseme 驱动）。
 - ❌ 不修改 / 不替换 BrowserTtsController。
+
+## 6. Day11B — Formant Viseme Analyzer（纯算法 clean-room 重写）
+
+> 新增：`apps/desktop/src/avatar/agent/formant-viseme-analyzer.ts`
+> gate：`scripts/avatar/formant-viseme-analyzer-gate.mjs`
+
+Day11B **不接 runtime、不创建音频对象、不写表情**，只把"频域数据 → 元音口型权重"的算法核心做出来，为 Day12 真实音频集成铺路。
+
+### 接口
+- `analyzeFormantViseme(input: { frequencyData, sampleRate, noiseGate? }): FormantVisemeResult`
+- `findPeakInRange(frequencyData, sampleRate, minFreq, maxFreq): FormantPeak`
+- `computeVocalEnergy(frequencyData, sampleRate, minFreq, maxFreq): number`
+- 类型：`MouthShape = "aa"|"ih"|"ou"|"ee"|"oh"`、`FormantPeak`、`FormantVisemeResult`
+
+### 分类规则（优先级）
+1. 静音 / 低能量（vocalEnergy ≤ noiseGate，默认 15）→ inactive，全 0
+2. F1 高（>500Hz）→ aa（大张嘴）
+3. F1 低（<350Hz）+ F2 高（>1500Hz）→ ih + ee×0.3
+4. F1 低 + F2 低 → ou
+5. F2 高（F1 居中）→ ee + ih×0.2
+6. 兜底 → oh + ou×0.3
+
+### 频率区间（源自 SAP 概念，仅参考不复制）
+- F1 搜索：200–1000Hz（开口大小）
+- F2 搜索：1000–3000Hz（舌位前后）
+- vocalEnergy：200–4000Hz 平均
+
+### 红线（本步已遵守）
+- ❌ 不创建 AudioContext / AnalyserNode / MediaElementSource / AudioBufferSourceNode
+- ❌ 不引入 wlipsync / edge-tts / kokoro / piper
+- ❌ 不写 `.setValue(`（仅 lip-sync-expression-writer.ts 允许）
+- ❌ 不复制 SAP AGPL 源码（仅重写思路）
+- ❌ 不接 VoidVrmSkin / BrowserTtsController / LipSyncControlOverlay
+
+## 7. 后续路线（待 BOSS 拍板）
+
+| 阶段 | 内容 | 前置 |
+|------|------|------|
+| **Day11A** | AudioTtsProvider 接口 + capability 探针 | 已完成（v0.3.16） |
+| **Day11B（本步）** | 纯算法 Formant Viseme Analyzer（F1/F2 → aa/ih/ou/ee/oh） | 无需 runtime，已落地 |
+| **Day11C** | Audio Source Adapter Probe：探测可产出 `supportsAudioNode` / `supportsAudioBuffer` 的 TTS 提供方 | 需选 edge-tts / kokoro / piper 之一 |
+| **Day12** | Formant Runtime Integration：把 analyzer 接到真实音频流 + writer | 需 Day11C 提供方可分析音频 |
+| **Day13** | Audio TTS Provider 实装选择（落地一个真实 TTS 提供方） | 同上 |
+
+建议顺序（BOSS 拍板）：**Day11A（接口）→ Day11B（算法）→ Day11C（音频源探测）→ Day12（集成）→ Day13（实装）**。

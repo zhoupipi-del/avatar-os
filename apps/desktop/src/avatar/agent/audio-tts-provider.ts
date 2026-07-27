@@ -14,7 +14,7 @@
  * 红线（本文件不做的）：
  * - 不写 AudioContext / AnalyserNode / AudioBufferSourceNode 实现
  * - 不引入真实音频 TTS 引擎依赖（云端/本地流式与 ML 语音合成库、wLipSync 运行时等）
- * - 不调用 expressionManager.setValue（不驱动口型）
+ * - 不调用表情写入接口（不驱动口型）
  * - 不修改 BrowserTtsController
  */
 

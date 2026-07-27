@@ -12,7 +12,8 @@
     "avatar:lip-sync-rhythm-gate": "node scripts/avatar/lip-sync-rhythm-gate.mjs",
     "avatar:text-viseme-expression-gate": "node scripts/avatar/text-viseme-expression-gate.mjs",
     "avatar:lip-sync-controls-gate": "node scripts/avatar/lip-sync-controls-gate.mjs",
-    "avatar:day11-audio-tts-probe-gate": "node scripts/avatar/day11-audio-tts-probe-gate.mjs"
+    "avatar:day11-audio-tts-probe-gate": "node scripts/avatar/day11-audio-tts-probe-gate.mjs",
+    "avatar:formant-viseme-analyzer-gate": "node scripts/avatar/formant-viseme-analyzer-gate.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]

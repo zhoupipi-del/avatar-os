@@ -18,3 +18,5 @@ export * from "./lip-sync-expression-writer";
 export * from "./text-viseme-expression-driver";
 export * from "./LipSyncControlOverlay";
 export * from "./audio-tts-provider";
+export { analyzeFormantViseme, findPeakInRange, computeVocalEnergy } from "./formant-viseme-analyzer";
+export type { FormantPeak, FormantVisemeResult } from "./formant-viseme-analyzer";
