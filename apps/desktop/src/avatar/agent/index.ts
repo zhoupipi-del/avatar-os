@@ -7,3 +7,4 @@ export * from "./llm-provider";
 export * from "./ollama-provider";
 export * from "./json-llm-brain";
 export * from "./brain-factory";
+export * from "./browser-tts-controller";

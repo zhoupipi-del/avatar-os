@@ -47,6 +47,7 @@ import type { SkinProps } from "./types";
 import {
   AgentInputOverlay,
   AgentRuntime,
+  BrowserTtsController,
   createDefaultDemoBrain,
   type AgentBodyBridge,
   type AgentEmotion,
@@ -73,6 +74,7 @@ interface VrmEngine {
   gaze: VrmGazeController;
   stability: VrmStabilityGuard;
   agentRuntime?: AgentRuntime;
+  tts?: BrowserTtsController;
 }
 
 function sanitizeFrameDelta(rawDelta: number): number {
@@ -141,10 +143,12 @@ function getVoidActionNames(
 function createVoidAgentBodyBridge(
   eng: VrmEngine,
   setAgentSpeech: (text: string) => void,
+  tts?: BrowserTtsController,
 ): AgentBodyBridge {
   return {
     speakText(text: string): void {
       setAgentSpeech(text);
+      tts?.speak(text);
     },
 
     setEmotion(emotion: AgentEmotion): void {
@@ -212,6 +216,7 @@ function createVoidAgentBodyBridge(
     },
 
     stop(): void {
+      tts?.cancel();
       eng.animation?.play("IDLE");
     },
   };
@@ -409,7 +414,14 @@ function VoidModel({
       engineRef.current = engine;
 
       // 7b. Text-only Agent Runtime 接线（v0.3.8-fast）
-      const agentBody = createVoidAgentBodyBridge(engine, onAgentSpeech);
+      const tts = new BrowserTtsController({
+        lang: "zh-CN",
+        rate: 1,
+        pitch: 1,
+        volume: 1,
+      });
+      engine.tts = tts;
+      const agentBody = createVoidAgentBodyBridge(engine, onAgentSpeech, tts);
       const agentRuntime = new AgentRuntime(createDefaultDemoBrain(), agentBody);
       engine.agentRuntime = agentRuntime;
       window.__avatarOSAgent = {
@@ -453,6 +465,7 @@ function VoidModel({
       cancelled = true;
       const eng = engineRef.current;
       if (eng) {
+        eng.tts?.dispose();
         eng.bridge.disconnect();
         eng.gaze.dispose(eng.vrm);
         disposeVrm(eng.vrm);

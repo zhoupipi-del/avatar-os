@@ -6,7 +6,8 @@
     "build": "pnpm --recursive run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "avatar:fast-demo-gate": "node scripts/avatar/fast-demo-gate.mjs"
+    "avatar:fast-demo-gate": "node scripts/avatar/fast-demo-gate.mjs",
+    "avatar:voice-demo-gate": "node scripts/avatar/voice-demo-gate.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]
