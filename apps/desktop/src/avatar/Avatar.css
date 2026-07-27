@@ -475,3 +475,9 @@
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.78);
 }
+
+.avatar-voice-control__debug-sep {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}

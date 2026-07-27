@@ -9,12 +9,14 @@ import type {
   BrowserTtsController,
   BrowserTtsStatus,
 } from "./browser-tts-controller";
+import type { LipShapeProbeResult } from "./vrm-lip-shape-probe";
 
 export interface VoiceControlOverlayProps {
   readonly tts: BrowserTtsController | null;
+  readonly lipProbe?: LipShapeProbeResult | null;
 }
 
-export function VoiceControlOverlay({ tts }: VoiceControlOverlayProps) {
+export function VoiceControlOverlay({ tts, lipProbe }: VoiceControlOverlayProps) {
   const [state, setState] = useState<VoiceControlState>(
     DEFAULT_VOICE_CONTROL_STATE,
   );
@@ -110,6 +112,15 @@ export function VoiceControlOverlay({ tts }: VoiceControlOverlayProps) {
         <div>speaking: {String(status?.speaking ?? false)}</div>
         <div>pending: {String(status?.pending ?? false)}</div>
         <div>voiceName: {status?.voiceName ?? "—"}</div>
+        <div className="avatar-voice-control__debug-sep" />
+        <div>
+          Lip:{" "}
+          {lipProbe
+            ? lipProbe.available
+              ? `available [${lipProbe.availableShapes.join(", ")}]`
+              : `missing [${lipProbe.missing.join(", ")}]`
+            : "probing…"}
+        </div>
       </div>
     </div>
   );

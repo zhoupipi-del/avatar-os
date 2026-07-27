@@ -19,6 +19,8 @@ const REQUIRED_FILES = [
   "apps/desktop/src/avatar/agent/voice-control-state.ts",
   "apps/desktop/src/avatar/agent/voice-control-state.test.ts",
   "apps/desktop/src/avatar/agent/VoiceControlOverlay.tsx",
+  "apps/desktop/src/avatar/agent/vrm-lip-shape-probe.ts",
+  "apps/desktop/src/avatar/agent/vrm-lip-shape-probe.test.ts",
   "apps/desktop/src/avatar/agent/json-llm-brain.ts",
   "apps/desktop/src/avatar/agent/brain-factory.ts",
   "apps/desktop/src/avatar/skins/VoidVrmSkin.tsx",
@@ -27,6 +29,9 @@ const REQUIRED_FILES = [
 const FORBIDDEN_PATH_PATTERNS = [
   /packages[\\/](lip-sync|lipsync|speech|relationship)/i,
   /apps[\\/]desktop[\\/]src[\\/]avatar[\\/].*(lip-sync|lipsync|edge-tts|kokoro|memory|relationship)/i,
+  // Day6 闸门：禁止完整 LipSync / Viseme / Audio→Viseme 引擎混入
+  // 注意：vrm-lip-shape-probe 是只读探测，文件名不含 lipsyncengine/viseme/audiocontext，不会被误杀
+  /apps[\\/]desktop[\\/]src[\\/]avatar[\\/].*(lipsyncengine|viseme|audio.?to.?viseme|audiocontext)/i,
 ];
 
 const checks = [];
@@ -216,6 +221,24 @@ assertContains(
   "apps/desktop/src/avatar/agent/browser-tts-controller.ts",
   /setOptions\(/,
   "Browser TTS supports setOptions",
+);
+
+assertContains(
+  "apps/desktop/src/avatar/agent/vrm-lip-shape-probe.ts",
+  /probeLipShapes/,
+  "VRM lip shape probe exports probeLipShapes",
+);
+
+assertContains(
+  "apps/desktop/src/avatar/skins/VoidVrmSkin.tsx",
+  /probeLipShapes/,
+  "VoidVrmSkin wires lip shape probe",
+);
+
+assertContains(
+  "apps/desktop/src/avatar/agent/vrm-lip-shape-probe.ts",
+  /getExpression|expressionMap|expressions/,
+  "Lip probe reads expression manager state only",
 );
 
 assertNoForbiddenFeatureFiles();
