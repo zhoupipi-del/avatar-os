@@ -17,3 +17,4 @@ export * from "./text-viseme-timeline";
 export * from "./lip-sync-expression-writer";
 export * from "./text-viseme-expression-driver";
 export * from "./LipSyncControlOverlay";
+export * from "./audio-tts-provider";
