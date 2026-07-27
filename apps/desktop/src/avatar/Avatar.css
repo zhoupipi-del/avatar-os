@@ -535,3 +535,27 @@
 .avatar-lip-rhythm-status__dot {
   color: rgba(120, 220, 160, 0.95);
 }
+
+/* ============================================================
+   Text Viseme Expression Driver (Day9-OneShot)
+   文本 viseme 驱动嘴型：状态 + 当前口型 + 权重 + 归零计数
+   ============================================================ */
+.avatar-text-viseme-status {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 280px;
+  z-index: 23;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(18, 16, 28, 0.72);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.avatar-text-viseme-status strong {
+  color: rgba(255, 255, 255, 0.96);
+}

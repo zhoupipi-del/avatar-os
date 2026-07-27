@@ -13,3 +13,6 @@ export * from "./VoiceControlOverlay";
 export * from "./vrm-lip-shape-probe";
 export * from "./lip-sync-noop-harness";
 export * from "./lip-sync-text-rhythm";
+export * from "./text-viseme-timeline";
+export * from "./lip-sync-expression-writer";
+export * from "./text-viseme-expression-driver";

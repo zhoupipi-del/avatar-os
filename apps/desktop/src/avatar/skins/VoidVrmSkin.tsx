@@ -50,6 +50,7 @@ import {
   BrowserTtsController,
   LipSyncNoopHarness,
   LipSyncTextRhythmDriver,
+  TextVisemeExpressionDriver,
   VoiceControlOverlay,
   createDefaultDemoBrain,
   probeLipShapes,
@@ -59,6 +60,7 @@ import {
   type LipShapeProbeResult,
   type LipSyncNoopStatus,
   type LipSyncRhythmStatus,
+  type TextVisemeExpressionDriverStatus,
 } from "../agent";
 
 declare global {
@@ -85,6 +87,7 @@ interface VrmEngine {
   lipShapeProbe?: LipShapeProbeResult;
   lipSyncNoop?: LipSyncNoopHarness;
   lipSyncRhythm?: LipSyncTextRhythmDriver;
+  textVisemeExpression?: TextVisemeExpressionDriver;
 }
 
 function sanitizeFrameDelta(rawDelta: number): number {
@@ -156,6 +159,7 @@ function createVoidAgentBodyBridge(
   tts?: BrowserTtsController,
   lipSyncNoop?: LipSyncNoopHarness,
   lipSyncRhythm?: LipSyncTextRhythmDriver,
+  textVisemeExpression?: TextVisemeExpressionDriver,
 ): AgentBodyBridge {
   return {
     speakText(text: string): void {
@@ -163,6 +167,7 @@ function createVoidAgentBodyBridge(
       tts?.speak(text);
       lipSyncNoop?.notifySpeechText(text);
       lipSyncRhythm?.startText(text);
+      textVisemeExpression?.startText(text);
     },
 
     setEmotion(emotion: AgentEmotion): void {
@@ -233,6 +238,7 @@ function createVoidAgentBodyBridge(
       tts?.cancel();
       lipSyncNoop?.cancel();
       lipSyncRhythm?.cancel();
+      textVisemeExpression?.cancel(eng.vrm?.expressionManager);
       eng.animation?.play("IDLE");
     },
   };
@@ -248,6 +254,7 @@ function VoidModel({
   onLipProbeChange,
   onLipSyncStatusChange,
   onRhythmStatusChange,
+  onTextVisemeStatusChange,
 }: {
   mood: SkinProps["mood"];
   onAgentSpeech: (text: string) => void;
@@ -255,6 +262,7 @@ function VoidModel({
   onLipProbeChange?: (result: LipShapeProbeResult | null) => void;
   onLipSyncStatusChange?: (status: LipSyncNoopStatus | null) => void;
   onRhythmStatusChange?: (status: LipSyncRhythmStatus | null) => void;
+  onTextVisemeStatusChange?: (status: TextVisemeExpressionDriverStatus | null) => void;
 }) {
   const [vrm, setVrm] = useState<import("@pixiv/three-vrm").VRM | null>(null);
   const engineRef = useRef<VrmEngine | null>(null);
@@ -468,12 +476,24 @@ function VoidModel({
       const lipSyncRhythm = new LipSyncTextRhythmDriver();
       engine.lipSyncRhythm = lipSyncRhythm;
 
+      // 7e. Day9-OneShot Text Viseme Expression Driver：唯一嘴型写入口。
+      //     文本 viseme 时间线（不接音频）→ 白名单 aa/ih/ou/ee/oh → 安全 setValue。
+      const textVisemeExpression = new TextVisemeExpressionDriver();
+      if (engine.lipShapeProbe) {
+        textVisemeExpression.setProbeAvailable(
+          engine.lipShapeProbe.available,
+          engine.vrm?.expressionManager,
+        );
+      }
+      engine.textVisemeExpression = textVisemeExpression;
+
       const agentBody = createVoidAgentBodyBridge(
         engine,
         onAgentSpeech,
         tts,
         lipSyncNoop,
         lipSyncRhythm,
+        textVisemeExpression,
       );
       const agentRuntime = new AgentRuntime(createDefaultDemoBrain(), agentBody);
       engine.agentRuntime = agentRuntime;
@@ -521,6 +541,7 @@ function VoidModel({
         eng.tts?.dispose();
         eng.lipSyncNoop?.cancel();
         eng.lipSyncRhythm?.cancel();
+        eng.textVisemeExpression?.cancel(eng.vrm?.expressionManager);
         eng.bridge.disconnect();
         eng.gaze.dispose(eng.vrm);
         disposeVrm(eng.vrm);
@@ -530,6 +551,7 @@ function VoidModel({
       onLipProbeChange?.(null);
       onLipSyncStatusChange?.(null);
       onRhythmStatusChange?.(null);
+      onTextVisemeStatusChange?.(null);
       delete window.__avatarOSAgent;
     };
   }, [vrm]);
@@ -551,10 +573,16 @@ function VoidModel({
       } else {
         onRhythmStatusChange?.(null);
       }
+
+      if (eng?.textVisemeExpression) {
+        onTextVisemeStatusChange?.(eng.textVisemeExpression.getStatus());
+      } else {
+        onTextVisemeStatusChange?.(null);
+      }
     }, 500);
 
     return () => window.clearInterval(interval);
-  }, [onLipSyncStatusChange, onRhythmStatusChange]);
+  }, [onLipSyncStatusChange, onRhythmStatusChange, onTextVisemeStatusChange]);
 
   // ─── 每帧管线（V2 Final Calibration 锁定顺序） ───
   useFrame((_, rawDelta) => {
@@ -593,6 +621,11 @@ function VoidModel({
 
     // 5. 眨眼写入
     eng.blink.update(delta);
+
+      // 5b. Day9-OneShot Text Viseme Expression Driver（唯一嘴型写入口）：
+      //     每帧用文本 viseme 时间线驱动嘴型（不接音频），
+      //     三闸门未全开时 writer 内部 no-op / 归零。Day8 rhythm 仅用于 UI 显示。
+      eng.textVisemeExpression?.update(eng.vrm?.expressionManager, delta);
 
     // 6. VRM 内部 Humanoid / Expression / SpringBone 最终计算
     eng.vrm.update(delta);
@@ -634,6 +667,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
   const [lipProbe, setLipProbe] = useState<LipShapeProbeResult | null>(null);
   const [lipSyncStatus, setLipSyncStatus] = useState<LipSyncNoopStatus | null>(null);
   const [rhythmStatus, setRhythmStatus] = useState<LipSyncRhythmStatus | null>(null);
+  const [textVisemeStatus, setTextVisemeStatus] = useState<TextVisemeExpressionDriverStatus | null>(null);
 
   return (
     <div className="avatar-vrm-stage">
@@ -653,6 +687,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
             onLipProbeChange={setLipProbe}
             onLipSyncStatusChange={setLipSyncStatus}
             onRhythmStatusChange={setRhythmStatus}
+            onTextVisemeStatusChange={setTextVisemeStatus}
           />
         </Suspense>
       </Canvas>
@@ -695,6 +730,30 @@ export function VoidVrmSkin({ mood }: SkinProps) {
           </div>
           <div>
             intensity: {rhythmStatus.intensity.toFixed(2)}
+          </div>
+        </div>
+      ) : null}
+
+      {textVisemeStatus ? (
+        <div className="avatar-text-viseme-status">
+          <div>
+            Text Viseme:{" "}
+            <strong>
+              {textVisemeStatus.writer.active ? "active" : "idle"}
+            </strong>
+          </div>
+          <div>
+            shape:{" "}
+            {textVisemeStatus.writer.currentShape ?? "none"} /{" "}
+            {textVisemeStatus.writer.currentWeight.toFixed(2)}
+          </div>
+          <div>
+            frame:{" "}
+            {textVisemeStatus.frame.phase} /{" "}
+            {(textVisemeStatus.frame.progress * 100).toFixed(0)}%
+          </div>
+          <div>
+            reset: {textVisemeStatus.writer.resetCount}
           </div>
         </div>
       ) : null}
