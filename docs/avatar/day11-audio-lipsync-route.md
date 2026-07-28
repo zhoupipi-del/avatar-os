@@ -162,3 +162,47 @@ frequencyData source → AudioSpectrumSource → FormantVisemeRuntimeProbe → a
 - ❌ 不改 VoidVrmSkin / BrowserTtsController / LipSyncControlOverlay（gate 校验三者不 import 新模块）
 - ❌ 不写 `.setValue(`、不驱动 expression（口型仍由 Day9 文本 viseme 驱动）
 - ❌ 新模块不反向 import runtime / writer（gate 校验）
+
+## 9. Day12 — WebAudio Runtime Bridge（真实频谱源实现 AudioSpectrumSource）
+
+> 新增：`apps/desktop/src/avatar/agent/web-audio-spectrum-source.ts`、`web-audio-formant-probe.ts`
+> gate：`scripts/avatar/web-audio-runtime-bridge-gate.mjs`
+
+Day12 把 Day11C 的适配层接到"浏览器真实音频分析能力"上，但**仍然不进产品 runtime、不接 BrowserTtsController / VoidVrmSkin / LipSyncControlOverlay / TextVisemeExpressionDriver / LipSyncExpressionWriter**——只在 isolated module + 测试验证链路，证明"真实频谱 → 口型"可行。
+
+### 设计：依赖注入（不创建音频对象）
+- `WebAudioSpectrumSource` 实现 Day11C 的 `AudioSpectrumSource`（`sampleRate` + `getFrequencyData(): Uint8Array`）。
+- 构造函数接收 `pullFrequencyData(data: Uint8Array): void` 注入函数（由调用方用真实 `AnalyserNode.getByteFrequencyData` 包装后传入）与可选 `dispose()` 钩子。
+- **本模块绝不 `new AudioContext` / `new AnalyserNode` / `createMediaElementSource` / `new Audio()` / `new AudioBufferSourceNode`**——测试用 fake analyser 注入，无需任何真实音频对象。
+- `getFrequencyData()` 复用内部 buffer 并放回防御性副本；`pullFrequencyData` 抛错时吞掉返回全 0，不向上抛异常。
+
+### web-audio-formant-probe.ts
+- `WebAudioFormantProbe(source, { noiseGate? })`：内部复用 Day11C 的 `FormantVisemeRuntimeProbe`，封装成面向 WebAudio 频谱源的便利封装。
+  - `update()`：拉一帧 → `analyzeFormantViseme` → 返回 `FormantVisemeResult | null`
+  - `getStatus()`：`{ active, lastResult, updateCount, lastReason, sourceSampleRate }`
+  - `dispose()`：安全释放频谱源（可重复调用）
+- `createWebAudioFormantProbe(source)`：工厂，直接组装一条完整 bridge。
+
+### 链路
+```
+WebAudioSpectrumSource(pullFrequencyData 注入) → getFrequencyData() → FormantVisemeRuntimeProbe.update() → analyzeFormantViseme() → FormantVisemeResult
+```
+
+### 红线（本步已遵守）
+- ❌ 不接 edge-tts / kokoro / piper / wlipsync
+- ❌ 不创建 AudioContext / AnalyserNode / MediaElementSource / AudioBufferSourceNode / `new Audio()`
+- ❌ 不改 VoidVrmSkin / BrowserTtsController / LipSyncControlOverlay（gate 校验三者不 import 新模块）
+- ❌ 不写 `.setValue(`、不驱动 expression（口型仍由 Day9 文本 viseme 驱动，本阶段不接）
+- ❌ 新模块不反向 import runtime / writer / driver（gate 校验）
+- ❌ 生产代码不得出现 `getByteFrequencyData`（只允许测试 fake 注入；真实接线推迟到 Day13）
+
+## 10. Day13 路线（真实 TTS provider 选择，待 BOSS 拍板）
+
+| 阶段 | 内容 | 前置 |
+|------|------|------|
+| **Day13A** | AudioFileTtsProvider：本地 WAV / base64 DataURL fixture 提供方，证明"文件型可分析音频"链路 | Day12 bridge |
+| **Day13B** | edge-tts 评估（产 WAV → MediaElementSource → AnalyserNode） | Day13A 链路 |
+| **Day13C** | kokoro 评估（产 WAV/PCM → AudioBufferSourceNode） | Day13A 链路 |
+| **Day13D** | piper 评估（产 WAV/PCM → AudioBufferSourceNode） | Day13A 链路 |
+
+建议顺序（BOSS 拍板）：**先用 AudioFileTtsProvider（本地 fixture）证明链路，再接真实 TTS 之一**。

@@ -22,3 +22,5 @@ export { analyzeFormantViseme, findPeakInRange, computeVocalEnergy } from "./for
 export type { FormantPeak, FormantVisemeResult } from "./formant-viseme-analyzer";
 export * from "./audio-spectrum-source";
 export * from "./formant-viseme-runtime-probe";
+export * from "./web-audio-spectrum-source";
+export * from "./web-audio-formant-probe";
