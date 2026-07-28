@@ -200,7 +200,8 @@ WebAudioSpectrumSource(pullFrequencyData 注入) → getFrequencyData() → Form
 
 | 阶段 | 内容 | 前置 |
 |------|------|------|
-| **Day13A（本步）** | Audio Fixture Provider：用循环频谱帧（CyclingFrequencySpectrumSource）模拟"可分析音频播放"，串 Day11A provider + Day11C source + Day12 probe 成测试闭环。**不解码 WAV / 不接真实 TTS** | Day12 bridge |
+| **Day13A（已完成）** | Audio Fixture Provider：用循环频谱帧（CyclingFrequencySpectrumSource）模拟"可分析音频播放"，串 Day11A provider + Day11C source + Day12 probe 成测试闭环。**不解码 WAV / 不接真实 TTS** | Day12 bridge |
+| **Day13B（本步）** | Real TTS Provider 评估：对 edge / kokoro / piper 三候选做许可证/运行时/打包/离线/浏览器/音频输出评估与排序，产出决策矩阵 + 最小 spike 建议。**不接产品 runtime、不引入真实 TTS 包** | Day13A 链路 |
 | **Day13B** | edge-tts 评估（产 WAV → MediaElementSource → AnalyserNode） | Day13A 链路 |
 | **Day13C** | kokoro 评估（产 WAV/PCM → AudioBufferSourceNode） | Day13A 链路 |
 | **Day13D** | piper 评估（产 WAV/PCM → AudioBufferSourceNode） | Day13A 链路 |
@@ -248,4 +249,6 @@ AudioFixtureTtsProvider.speak(text)
 - ❌ Day13A gate 的禁用词扫描**仅限本 milestone 新增的 4 个文件**，避免误伤 Day11/Day12 既有注释（各 gate 互不干扰）
 
 ### 下一步（待 BOSS 拍板）
-- **Day13B** edge-tts 评估 → **Day13C** kokoro → **Day13D** piper（真实 TTS 接入，届时再接 BrowserTtsController 或独立 provider，并决定是否驱动 VOID 嘴型）
+- **Day13B（已完成）**：Real TTS Provider 评估决策模块（`real-tts-provider-decision.ts`）+ 决策文档（`day13-real-tts-provider-evaluation.md`）。当前推荐 `kokoro` 居首，`piper` 紧随，二者均为本地/MIT/离线；`edge` 因在线+高许可证风险排末位。
+- **Day13C**（待拍板）：先做最小 spike —— 选项 A Local Audio File Provider（本地 WAV/base64，零 ML 依赖）或 选项 B kokoro/piper 实装 `implements AudioTtsProvider` 的本地 provider（仅验证"产出 AudioBuffer → 接 Day11C/Day12 探针"），**不接产品 runtime、不驱动 VOID 嘴型**。具体以本地依赖评估结果（包可得性 + 中文音色）为准，可能从 kokoro 翻转到 piper。
+- **Day13D**：剩余真实 TTS 路线补充评估 / 实装。
