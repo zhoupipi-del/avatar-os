@@ -20,3 +20,5 @@ export * from "./LipSyncControlOverlay";
 export * from "./audio-tts-provider";
 export { analyzeFormantViseme, findPeakInRange, computeVocalEnergy } from "./formant-viseme-analyzer";
 export type { FormantPeak, FormantVisemeResult } from "./formant-viseme-analyzer";
+export * from "./audio-spectrum-source";
+export * from "./formant-viseme-runtime-probe";

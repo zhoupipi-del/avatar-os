@@ -115,14 +115,50 @@ Day11B **不接 runtime、不创建音频对象、不写表情**，只把"频域
 - ❌ 不复制 SAP AGPL 源码（仅重写思路）
 - ❌ 不接 VoidVrmSkin / BrowserTtsController / LipSyncControlOverlay
 
-## 7. 后续路线（待 BOSS 拍板）
+## 7. 后续路线（BOSS 已拍板修订）
+
+> 修订说明：原 Day11C"选 edge-tts / kokoro / piper 之一"的方向被 BOSS 压住 ——
+> **Day11C 不接任何真实 TTS**，只做频谱源适配层（纯数据）。真实 TTS 提供方选择推迟到 Day13。
 
 | 阶段 | 内容 | 前置 |
 |------|------|------|
 | **Day11A** | AudioTtsProvider 接口 + capability 探针 | 已完成（v0.3.16） |
-| **Day11B（本步）** | 纯算法 Formant Viseme Analyzer（F1/F2 → aa/ih/ou/ee/oh） | 无需 runtime，已落地 |
-| **Day11C** | Audio Source Adapter Probe：探测可产出 `supportsAudioNode` / `supportsAudioBuffer` 的 TTS 提供方 | 需选 edge-tts / kokoro / piper 之一 |
-| **Day12** | Formant Runtime Integration：把 analyzer 接到真实音频流 + writer | 需 Day11C 提供方可分析音频 |
-| **Day13** | Audio TTS Provider 实装选择（落地一个真实 TTS 提供方） | 同上 |
+| **Day11B** | 纯算法 Formant Viseme Analyzer（F1/F2 → aa/ih/ou/ee/oh） | 已完成（v0.3.17） |
+| **Day11C（本步）** | Audio Source Adapter Probe：AudioSpectrumSource + FormantVisemeRuntimeProbe（纯数据，不接真实 TTS） | 无需 runtime，已落地 |
+| **Day12** | WebAudio Runtime Bridge：真实频谱源实现 AudioSpectrumSource（可先用 mock/local fixture） | Day11C 适配层 |
+| **Day13** | 真实 TTS provider 选择：13A edge-tts / 13B kokoro / 13C piper（三选一，届时拍板） | Day12 bridge |
 
-建议顺序（BOSS 拍板）：**Day11A（接口）→ Day11B（算法）→ Day11C（音频源探测）→ Day12（集成）→ Day13（实装）**。
+建议顺序（BOSS 拍板）：**Day11A（接口）→ Day11B（算法）→ Day11C（适配层）→ Day12（bridge）→ Day13（真实 TTS 实装）**。
+
+## 8. Day11C — Audio Source Adapter Probe（频谱源适配层，纯数据）
+
+> 新增：`apps/desktop/src/avatar/agent/audio-spectrum-source.ts`、`formant-viseme-runtime-probe.ts`
+> gate：`scripts/avatar/audio-source-adapter-probe-gate.mjs`
+
+Day11C 把 Day11A（AudioTtsProvider capability）与 Day11B（analyzer 算法）中间那层补上：
+
+```
+frequencyData source → AudioSpectrumSource → FormantVisemeRuntimeProbe → analyzeFormantViseme()
+```
+
+**不接真实 TTS、不接 runtime、不让嘴动** —— 数据全部来自静态 fixture。
+
+### audio-spectrum-source.ts
+- `AudioSpectrumSource`：`sampleRate` + `getFrequencyData(): Uint8Array` 的频谱源抽象（Day12 的真实实现将实现它）
+- `StaticFrequencySpectrumSource`：单帧静态源（每次返回防御性副本，非 Uint8Array 输入 clamp+round 归一化）
+- `CyclingFrequencySpectrumSource`：多帧循环源（`getCursor()` / `resetCursor()`，空帧数组安全兜底）
+- `createSilentSpectrumSource(binCount?, sampleRate?)`：全 0 静音源工厂 → analyzer 必然 inactive
+
+### formant-viseme-runtime-probe.ts
+- `FormantVisemeRuntimeProbe(source, { noiseGate? })`：无内部定时器，调用方决定节奏
+  - `update()`：拉一帧 → `analyzeFormantViseme` → 缓存并返回；无 source / source 抛错 → 返回 null 不 throw 不计数
+  - `getStatus()`：`{ active, lastResult, updateCount, lastReason }`（无结果时 lastReason="no-update"）
+  - `setSource(source | null)`：运行时换源；`reset()`：清状态留源；`cancel()`：断源 + 清状态
+- `FormantVisemeProbeStatus` / `FormantVisemeProbeOptions` 类型
+
+### 红线（本步已遵守）
+- ❌ 不接 edge-tts / kokoro / piper / wlipsync
+- ❌ 不创建 AudioContext / AnalyserNode / MediaElementSource / AudioBufferSourceNode
+- ❌ 不改 VoidVrmSkin / BrowserTtsController / LipSyncControlOverlay（gate 校验三者不 import 新模块）
+- ❌ 不写 `.setValue(`、不驱动 expression（口型仍由 Day9 文本 viseme 驱动）
+- ❌ 新模块不反向 import runtime / writer（gate 校验）
