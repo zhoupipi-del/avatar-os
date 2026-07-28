@@ -200,9 +200,52 @@ WebAudioSpectrumSource(pullFrequencyData 注入) → getFrequencyData() → Form
 
 | 阶段 | 内容 | 前置 |
 |------|------|------|
-| **Day13A** | AudioFileTtsProvider：本地 WAV / base64 DataURL fixture 提供方，证明"文件型可分析音频"链路 | Day12 bridge |
+| **Day13A（本步）** | Audio Fixture Provider：用循环频谱帧（CyclingFrequencySpectrumSource）模拟"可分析音频播放"，串 Day11A provider + Day11C source + Day12 probe 成测试闭环。**不解码 WAV / 不接真实 TTS** | Day12 bridge |
 | **Day13B** | edge-tts 评估（产 WAV → MediaElementSource → AnalyserNode） | Day13A 链路 |
 | **Day13C** | kokoro 评估（产 WAV/PCM → AudioBufferSourceNode） | Day13A 链路 |
 | **Day13D** | piper 评估（产 WAV/PCM → AudioBufferSourceNode） | Day13A 链路 |
 
-建议顺序（BOSS 拍板）：**先用 AudioFileTtsProvider（本地 fixture）证明链路，再接真实 TTS 之一**。
+建议顺序（BOSS 拍板）：**先用 Day13A fixture provider（循环帧）证明链路，再接真实 TTS 之一**。
+
+## 11. Day13A — Audio Fixture TTS Provider（测试闭环，不接真实 TTS）
+
+> 新增：`apps/desktop/src/avatar/agent/audio-fixture-tts-provider.ts`、`audio-fixture-formant-pipeline.ts` 及对应 `.test.ts`
+> gate：`scripts/avatar/audio-fixture-tts-provider-gate.mjs`
+> 收口：commit `feat(avatar): add audio fixture TTS provider`（不 push 不 tag，待 BOSS 验收 PASS 后收口 push + tag v0.3.20）
+
+Day13A 把 Day11A（provider 接口）/ Day11B（analyzer）/ Day11C（source + probe）/ Day12（bridge 设计）串成一条**端到端测试闭环**，但**不接任何真实 TTS、不接产品 runtime、不驱动嘴**：
+
+```
+AudioFixtureTtsProvider.speak(text)
+  → AudioFixturePlaybackSession.getSpectrumSource()
+  → CyclingFrequencySpectrumSource（元音帧循环，模拟可分析音频）
+  → FormantVisemeRuntimeProbe.update() × N
+  → aa / ih / ou / ee / oh（FormantVisemeResult[]）
+```
+
+### capability 扩展（向后兼容）
+- `AudioTtsCapability` 新增可选字段 `supportsSpectrumSource?: boolean`；`NO_AUDIO_TTS_CAPABILITY` 显式置 `false`。
+- 旧测试 `audio-tts-provider.test.ts` 用 `toEqual(NO_AUDIO_TTS_CAPABILITY)` 全等比较，扩展后仍为同一对象，不受影响（基础闸门 root vitest 已验证）。
+
+### audio-fixture-tts-provider.ts
+- `AudioFixtureTtsProvider implements AudioTtsProvider`：`getCapability()` 返回 `supportsAudioNode/AudioBuffer/Pcm=false, supportsSpectrumSource=true`；`isAvailable()=true`。
+- `speak(text)`：用 `buildVowelFrames()` 构造 5 帧（aa/ih/ou/ee/oh）经 `CyclingFrequencySpectrumSource` 循环，返回 `AudioFixturePlaybackSession`（含 `text` / `durationMs` / `startedAt` / `status` / `getSpectrumSource()`）。
+- `AudioFixturePlaybackSession implements AudioTtsPlaybackSession`：`getAudioNode/getAudioBuffer/getPcm` 全返回 null；`getSpectrumSource()` 暴露 fixture 频谱源；`cancel()` 幂等。
+- **不 `new AudioContext` / 不 `new Audio()` / 不解码 WAV / 不写 expression**。
+
+### audio-fixture-formant-pipeline.ts
+- `AudioFixtureFormantPipeline(provider)`：`speakAndAnalyze(text, frameCount?)` → `provider.speak` → 取频谱源 → `FormantVisemeRuntimeProbe` 逐帧 `update` → 聚合 `AudioFixturePipelineResult { sessionText, results, activeCount, reasons }`。
+- `reset()`（清探针状态）/ `cancel()`（断会话+探针，幂等）；任何一步抛错吞掉返回空结果，不向上传播。
+- `createAudioFixtureFormantPipeline(provider)` 工厂。
+- **不接 VRM / UI，不写 expression**。
+
+### 红线（本步已遵守）
+- ❌ 不接 edge-tts / kokoro / piper / wlipsync
+- ❌ 不创建 AudioContext / MediaElementSource / AudioBufferSourceNode / `new Audio()`
+- ❌ 不改 VoidVrmSkin / BrowserTtsController / LipSyncControlOverlay（gate 校验三者不 import 新模块）
+- ❌ 不写 `.setValue(`、不驱动 expression
+- ❌ 新模块不反向 import runtime / writer / driver（gate 校验）
+- ❌ Day13A gate 的禁用词扫描**仅限本 milestone 新增的 4 个文件**，避免误伤 Day11/Day12 既有注释（各 gate 互不干扰）
+
+### 下一步（待 BOSS 拍板）
+- **Day13B** edge-tts 评估 → **Day13C** kokoro → **Day13D** piper（真实 TTS 接入，届时再接 BrowserTtsController 或独立 provider，并决定是否驱动 VOID 嘴型）

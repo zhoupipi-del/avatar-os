@@ -15,7 +15,8 @@
     "avatar:day11-audio-tts-probe-gate": "node scripts/avatar/day11-audio-tts-probe-gate.mjs",
     "avatar:formant-viseme-analyzer-gate": "node scripts/avatar/formant-viseme-analyzer-gate.mjs",
     "avatar:audio-source-adapter-probe-gate": "node scripts/avatar/audio-source-adapter-probe-gate.mjs",
-    "avatar:web-audio-runtime-bridge-gate": "node scripts/avatar/web-audio-runtime-bridge-gate.mjs"
+    "avatar:web-audio-runtime-bridge-gate": "node scripts/avatar/web-audio-runtime-bridge-gate.mjs",
+    "avatar:audio-fixture-tts-provider-gate": "node scripts/avatar/audio-fixture-tts-provider-gate.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]

@@ -24,3 +24,5 @@ export * from "./audio-spectrum-source";
 export * from "./formant-viseme-runtime-probe";
 export * from "./web-audio-spectrum-source";
 export * from "./web-audio-formant-probe";
+export * from "./audio-fixture-tts-provider";
+export * from "./audio-fixture-formant-pipeline";

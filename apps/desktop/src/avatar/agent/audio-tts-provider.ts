@@ -35,6 +35,12 @@ export interface AudioTtsCapability {
    * 提供方能直接给出 PCM 采样（Float32 通道 + sampleRate），用于离线分析。
    */
   readonly supportsPcm: boolean;
+  /**
+   * （可选）提供方能暴露一个可直接取频域帧的频谱源（AudioSpectrumSource），
+   * 用于离线/测试闭环（如 fixture provider 用静态/循环帧模拟"可分析音频"）。
+   * 真实 TTS 引擎若只能给 AudioNode/AudioBuffer/PCM，此项为 false/undefined。
+   */
+  readonly supportsSpectrumSource?: boolean;
 }
 
 /** 所有音频能力都为 false 的常量（如当前 BrowserTtsController）。 */
@@ -42,6 +48,7 @@ export const NO_AUDIO_TTS_CAPABILITY: AudioTtsCapability = Object.freeze({
   supportsAudioNode: false,
   supportsAudioBuffer: false,
   supportsPcm: false,
+  supportsSpectrumSource: false,
 });
 
 export type AudioTtsSessionStatus = "idle" | "playing" | "ended" | "cancelled";
