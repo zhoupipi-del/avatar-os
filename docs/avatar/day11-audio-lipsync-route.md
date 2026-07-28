@@ -201,12 +201,11 @@ WebAudioSpectrumSource(pullFrequencyData 注入) → getFrequencyData() → Form
 | 阶段 | 内容 | 前置 |
 |------|------|------|
 | **Day13A（已完成）** | Audio Fixture Provider：用循环频谱帧（CyclingFrequencySpectrumSource）模拟"可分析音频播放"，串 Day11A provider + Day11C source + Day12 probe 成测试闭环。**不解码 WAV / 不接真实 TTS** | Day12 bridge |
-| **Day13B（本步）** | Real TTS Provider 评估：对 edge / kokoro / piper 三候选做许可证/运行时/打包/离线/浏览器/音频输出评估与排序，产出决策矩阵 + 最小 spike 建议。**不接产品 runtime、不引入真实 TTS 包** | Day13A 链路 |
-| **Day13B** | edge-tts 评估（产 WAV → MediaElementSource → AnalyserNode） | Day13A 链路 |
-| **Day13C** | kokoro 评估（产 WAV/PCM → AudioBufferSourceNode） | Day13A 链路 |
-| **Day13D** | piper 评估（产 WAV/PCM → AudioBufferSourceNode） | Day13A 链路 |
+| **Day13B（已完成）** | Real TTS Provider 评估：对 edge / kokoro / piper 三候选做许可证/运行时/打包/离线/浏览器/音频输出评估与排序，产出决策矩阵 + 最小 spike 建议。**不接产品 runtime、不引入真实 TTS 包** | Day13A 链路 |
+| **Day13C（本步）** | Local PCM Fixture Provider：用合成元音 PCM（f1/f2 共振峰模型）→ 纯 TS FFT → 频域幅度 → formant 分析，证明"类真实音频数据链路"。**不接真实 TTS、不接产品 runtime** | Day13A 链路 |
+| **Day13D（待拍板）** | kokoro/piper 最小 spike：验证包可安装 / 模型可加载 / 中文音色可用 / 产物能转 PCM/AudioBuffer / 能接 formant pipeline。**不接产品 runtime、不驱动嘴** | Day13C 链路 |
 
-建议顺序（BOSS 拍板）：**先用 Day13A fixture provider（循环帧）证明链路，再接真实 TTS 之一**。
+建议顺序（BOSS 拍板）：**先用 Day13A fixture provider（循环帧）证明链路，再用 Day13C PCM fixture 证明类真实音频数据链路，最后接真实 TTS（Day13D）**。
 
 ## 11. Day13A — Audio Fixture TTS Provider（测试闭环，不接真实 TTS）
 
@@ -250,5 +249,53 @@ AudioFixtureTtsProvider.speak(text)
 
 ### 下一步（待 BOSS 拍板）
 - **Day13B（已完成）**：Real TTS Provider 评估决策模块（`real-tts-provider-decision.ts`）+ 决策文档（`day13-real-tts-provider-evaluation.md`）。当前推荐 `kokoro` 居首，`piper` 紧随，二者均为本地/MIT/离线；`edge` 因在线+高许可证风险排末位。
-- **Day13C**（待拍板）：先做最小 spike —— 选项 A Local Audio File Provider（本地 WAV/base64，零 ML 依赖）或 选项 B kokoro/piper 实装 `implements AudioTtsProvider` 的本地 provider（仅验证"产出 AudioBuffer → 接 Day11C/Day12 探针"），**不接产品 runtime、不驱动 VOID 嘴型**。具体以本地依赖评估结果（包可得性 + 中文音色）为准，可能从 kokoro 翻转到 piper。
-- **Day13D**：剩余真实 TTS 路线补充评估 / 实装。
+- **Day13C（已完成）**：Local PCM Fixture Provider —— 用合成元音 PCM（f1/f2 共振峰模型）→ 纯 TS radix-2 FFT → 频域幅度 → formant 分析，证明"类真实音频数据链路"（PCM → AudioTtsProvider → PcmSpectrumSource → FormantVisemeRuntimeProbe → aa/ih/ou/ee/oh）。不接真实 TTS、不接产品 runtime、不驱动嘴。
+- **Day13D（待拍板）**：kokoro/piper 最小 spike —— 验证包可安装 / 模型可加载 / 中文音色可用 / 产物能转 PCM/AudioBuffer / 能接 formant pipeline。**不接产品 runtime、不驱动 VOID 嘴型**。具体以本地依赖评估结果（包可得性 + 中文音色）为准，可能从 kokoro 翻转到 piper。
+
+## 12. Day13C — Local PCM Fixture Provider（合成 PCM → FFT → formant，不接真实 TTS）
+
+> 新增：`apps/desktop/src/avatar/agent/pcm-spectrum-source.ts`、`local-pcm-fixture-tts-provider.ts`、`local-pcm-formant-pipeline.ts` 及对应 `.test.ts`
+> gate：`scripts/avatar/local-pcm-fixture-provider-gate.mjs`
+> 收口：commit `feat(avatar): add local PCM fixture provider`（不 push 不 tag，待 BOSS 验收 PASS 后收口 push + tag v0.3.22）
+
+Day13C 把 Day13A 的"预构造频谱帧"升级为"从时域 PCM 采样出发，经过真实 FFT 变换得到频谱"，更接近真实音频处理链路。但**不接任何真实 TTS、不接产品 runtime、不驱动嘴**：
+
+```
+LocalPcmFixtureTtsProvider.speak(text)
+  → LocalPcmFixturePlaybackSession（内含 PCM + 频谱源）
+  → PcmSpectrumSource（PCM → Hann 窗 → radix-2 FFT → 幅度 → dB → 0~255）
+  → FormantVisemeRuntimeProbe.update() × N
+  → aa / ih / ou / ee / oh（FormantVisemeResult[]）
+```
+
+### pcm-spectrum-source.ts
+- `PcmSpectrumSource implements AudioSpectrumSource`：从 PCM 采样逐帧计算频域幅度(0~255)。
+  - 构造：`sampleRate` / `channelData: readonly number[] | Float32Array` / `frameSize`（默认 1024，必须为 2 的幂）
+  - `getFrequencyData()`：取当前窗口(frameSize 个采样) → Hann 窗 → FFT → 幅度 → dB → 0~255 → 频谱底噪(floor=30) → 返回 `Uint8Array`；游标前移 frameSize；到尾部返回全 0 静音
+  - `getCursor()` / `resetCursor()`：游标管理
+- `buildSyntheticVowelPcm(sampleRate, durationMs, f1, f2, options?)`：用 f1/f2 共振峰模型合成元音 PCM。
+  - 原理：基频 f0 产生谐波序列，每个谐波的幅度 = R(f, f1, bw1) + R(f, f2, bw2)（加法模型，确保 f1 和 f2 远距时两端都有能量）
+  - R(f, center, bw) = 1 / (1 + ((f - center) / bw)^2)
+  - 归一化到 0.9 幅度；不读文件、不解码媒体、不创建音频对象
+- 纯 TS radix-2 Cooley-Tukey FFT（迭代式），不依赖浏览器音频 API
+- **不创建音频上下文 / 媒体元素 / 缓冲源 / `new Audio()`**
+
+### local-pcm-fixture-tts-provider.ts
+- `LocalPcmFixtureTtsProvider implements AudioTtsProvider`：`getCapability()` 返回 `supportsPcm=true, supportsSpectrumSource=true, supportsAudioNode/AudioBuffer=false`；`isAvailable()=true`。
+- `speak(text)`：用 `buildMultiVowelPcm()` 拼接五段元音 PCM（aa/ih/ou/ee/oh），返回 `LocalPcmFixturePlaybackSession`。
+- `LocalPcmFixturePlaybackSession implements AudioTtsPlaybackSession`：`getPcm()` 返回非 null PCM 数据；`getSpectrumSource()` 暴露 `PcmSpectrumSource`；`getAudioNode/getAudioBuffer` 返回 null；`cancel()` 幂等。
+- **不接真实 TTS / 不写 expression**
+
+### local-pcm-formant-pipeline.ts
+- `LocalPcmFormantPipeline(provider)`：`speakAndAnalyze(text, frameCount?)` → `provider.speak` → 取频谱源 → `FormantVisemeRuntimeProbe` 逐帧 `update` → 聚合 `LocalPcmPipelineResult { sessionText, results, activeCount, reasons }`。
+- `reset()` / `cancel()` 幂等；任何一步抛错吞掉返回空结果。
+- `createLocalPcmFormantPipeline(provider)` 工厂。
+
+### 红线（本步已遵守）
+- ❌ 不接 edge-tts / kokoro / piper / wlipsync
+- ❌ 不创建 AudioContext / MediaElementSource / AudioBufferSourceNode / `new Audio()`
+- ❌ 不改 VoidVrmSkin / BrowserTtsController / LipSyncControlOverlay（gate 校验三者不 import 新模块）
+- ❌ 不写 `.setValue(`、不驱动 expression
+- ❌ 新模块不反向 import runtime / writer / driver（gate 校验）
+- ❌ 不使用 `node:fs` / `node:url`（Day13B 教训：desktop tsconfig 不解析 node: 前缀）
+- ❌ Day13C gate 的禁用词扫描**仅限本 milestone 新增的 6 个文件**，避免误伤 Day11/Day12/Day13A/B 既有注释（各 gate 互不干扰）

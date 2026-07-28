@@ -27,3 +27,6 @@ export * from "./web-audio-formant-probe";
 export * from "./audio-fixture-tts-provider";
 export * from "./audio-fixture-formant-pipeline";
 export * from "./real-tts-provider-decision";
+export * from "./pcm-spectrum-source";
+export * from "./local-pcm-fixture-tts-provider";
+export * from "./local-pcm-formant-pipeline";
