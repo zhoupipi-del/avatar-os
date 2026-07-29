@@ -203,9 +203,9 @@ WebAudioSpectrumSource(pullFrequencyData 注入) → getFrequencyData() → Form
 | **Day13A（已完成）** | Audio Fixture Provider：用循环频谱帧（CyclingFrequencySpectrumSource）模拟"可分析音频播放"，串 Day11A provider + Day11C source + Day12 probe 成测试闭环。**不解码 WAV / 不接真实 TTS** | Day12 bridge |
 | **Day13B（已完成）** | Real TTS Provider 评估：对 edge / kokoro / piper 三候选做许可证/运行时/打包/离线/浏览器/音频输出评估与排序，产出决策矩阵 + 最小 spike 建议。**不接产品 runtime、不引入真实 TTS 包** | Day13A 链路 |
 | **Day13C（本步）** | Local PCM Fixture Provider：用合成元音 PCM（f1/f2 共振峰模型）→ 纯 TS FFT → 频域幅度 → formant 分析，证明"类真实音频数据链路"。**不接真实 TTS、不接产品 runtime** | Day13A 链路 |
-| **Day13D（待拍板）** | kokoro/piper 最小 spike：验证包可安装 / 模型可加载 / 中文音色可用 / 产物能转 PCM/AudioBuffer / 能接 formant pipeline。**不接产品 runtime、不驱动嘴** | Day13C 链路 |
+| **Day13D（已完成）** | TTS Dependency Spike：对 kokoro / piper 两候选做依赖可行性评估（包能否安装 / 浏览器运行 / 离线 / PCM 输出 / 中文音色 / 打包与运行时风险），产出决策矩阵 + Day14 推荐。**不安装真实包、不接产品 runtime、不驱动嘴** | Day13C 链路 |
 
-建议顺序（BOSS 拍板）：**先用 Day13A fixture provider（循环帧）证明链路，再用 Day13C PCM fixture 证明类真实音频数据链路，最后接真实 TTS（Day13D）**。
+建议顺序（BOSS 拍板）：**先用 Day13A fixture provider（循环帧）证明链路，再用 Day13C PCM fixture 证明类真实音频数据链路，再用 Day13D 评估真实 TTS 依赖可行性，最后接真实 TTS（Day14）**。
 
 ## 11. Day13A — Audio Fixture TTS Provider（测试闭环，不接真实 TTS）
 
@@ -250,7 +250,8 @@ AudioFixtureTtsProvider.speak(text)
 ### 下一步（待 BOSS 拍板）
 - **Day13B（已完成）**：Real TTS Provider 评估决策模块（`real-tts-provider-decision.ts`）+ 决策文档（`day13-real-tts-provider-evaluation.md`）。当前推荐 `kokoro` 居首，`piper` 紧随，二者均为本地/MIT/离线；`edge` 因在线+高许可证风险排末位。
 - **Day13C（已完成）**：Local PCM Fixture Provider —— 用合成元音 PCM（f1/f2 共振峰模型）→ 纯 TS radix-2 FFT → 频域幅度 → formant 分析，证明"类真实音频数据链路"（PCM → AudioTtsProvider → PcmSpectrumSource → FormantVisemeRuntimeProbe → aa/ih/ou/ee/oh）。不接真实 TTS、不接产品 runtime、不驱动嘴。
-- **Day13D（待拍板）**：kokoro/piper 最小 spike —— 验证包可安装 / 模型可加载 / 中文音色可用 / 产物能转 PCM/AudioBuffer / 能接 formant pipeline。**不接产品 runtime、不驱动 VOID 嘴型**。具体以本地依赖评估结果（包可得性 + 中文音色）为准，可能从 kokoro 翻转到 piper。
+- **Day13D（已完成）**：TTS Dependency Spike —— 对 kokoro / piper 两候选做依赖可行性评估（`tts-dependency-spike.ts`），回答五个核心问题：包能否安装 / 模型如何加载 / 中文能否出声 / 输出能否拿到 PCM 或 buffer / 能否接 Day13C 频谱管线。当前推荐 kokoro 居首（浏览器优先、风险更低），piper 次之（原生 PCM 输出但浏览器兼容性待验证）。**不安装真实包、不接产品 runtime、不驱动嘴**。
+- **Day14（待拍板）**：选一个 provider（kokoro 优先）做最小实现 —— 安装包 → 加载中文音色 → 验证 PCM 输出 → 接 Day13C 频谱管线。仍不接产品 runtime、不驱动 VOID 嘴型。
 
 ## 12. Day13C — Local PCM Fixture Provider（合成 PCM → FFT → formant，不接真实 TTS）
 
@@ -299,3 +300,37 @@ LocalPcmFixtureTtsProvider.speak(text)
 - ❌ 新模块不反向 import runtime / writer / driver（gate 校验）
 - ❌ 不使用 `node:fs` / `node:url`（Day13B 教训：desktop tsconfig 不解析 node: 前缀）
 - ❌ Day13C gate 的禁用词扫描**仅限本 milestone 新增的 6 个文件**，避免误伤 Day11/Day12/Day13A/B 既有注释（各 gate 互不干扰）
+
+## 13. Day13D — TTS Dependency Spike（kokoro / piper 依赖可行性探针，不安装真实包）
+
+> 新增：`apps/desktop/src/avatar/agent/tts-dependency-spike.ts` 及 `.test.ts`
+> 文档：`docs/avatar/day13d-tts-dependency-spike.md`
+> gate：`scripts/avatar/tts-dependency-spike-gate.mjs`
+> 收口：commit `docs(avatar): add TTS dependency spike`（不 push 不 tag，待 BOSS 验收 PASS 后收口 push + tag v0.3.23）
+
+Day13D 是 Day13B（real-tts-provider-decision）的下游细化：Day13B 做三候选（含 edge）的宏观评估，本模块聚焦 kokoro / piper 两个本地候选的**依赖落地可行性**。**不安装任何真实 TTS 包、不接产品 runtime、不驱动嘴**。
+
+### tts-dependency-spike.ts
+- `TtsDependencyCandidate = "kokoro" | "piper"`（edge 本轮不进入）
+- `TtsDependencyProbeResult`：10 个字段（candidate / packageAvailable / canRunInBrowser / canRunOffline / canOutputPcm / canOutputAudioBuffer / hasChineseVoice / modelPackagingRisk / runtimeRisk / recommendedNextAction / notes）
+- `evaluateTtsDependencyCandidate(candidate)` → 结构化评估
+- `rankTtsDependencyCandidates()` → 稳定排序（综合评分：风险权重×2 + 状态分）
+- `recommendTtsDependencySpike()` → 排序首位（当前为 kokoro）
+- 评估结论：
+  - **kokoro**：packageAvailable=true, canRunInBrowser=true, canRunOffline=true, canOutputPcm=unknown, canOutputAudioBuffer=unknown, hasChineseVoice=unknown, modelPackagingRisk=medium, runtimeRisk=medium → 综合评分 7
+  - **piper**：packageAvailable=true, canRunInBrowser=unknown, canRunOffline=true, canOutputPcm=true, canOutputAudioBuffer=unknown, hasChineseVoice=unknown, modelPackagingRisk=high, runtimeRisk=high → 综合评分 11
+- **不 import 真实 TTS 包 / 不创建音频上下文 / 不写 expression**
+
+### 红线（本步已遵守）
+- ❌ 不安装 / import 真实 TTS 包（kokoro-js / piper-tts / edge-tts 均不引）
+- ❌ 不创建 AudioContext / MediaElementSource / AudioBufferSourceNode / `new Audio()`
+- ❌ 不改 VoidVrmSkin / BrowserTtsController / LipSyncControlOverlay（gate 校验三者不 import 新模块）
+- ❌ 不写 `.setValue(`、不驱动 expression
+- ❌ 新模块不反向 import runtime / writer / driver（gate 校验）
+- ❌ 不使用 `node:fs` / `node:url`
+- ❌ Day13D gate 的禁用词扫描**仅限本 milestone 新增的 2 个 .ts 文件**（kokoro / piper 作为候选标识符允许出现；禁止的是真实包名 kokoro-js / piper-tts / edge-tts）
+
+### 下一步（Day14，待 BOSS 拍板）
+- **Day14A**：选一个 provider（kokoro 优先）做最小实现 —— 安装包 → 加载中文音色 → 验证 PCM 输出 → 接 Day13C 频谱管线
+- **Day14B**：把真实 provider 输出接 Local PCM / Formant pipeline
+- **Day15**：再考虑接产品 runtime（让 VOID 嘴动）

@@ -18,7 +18,8 @@
     "avatar:web-audio-runtime-bridge-gate": "node scripts/avatar/web-audio-runtime-bridge-gate.mjs",
     "avatar:audio-fixture-tts-provider-gate": "node scripts/avatar/audio-fixture-tts-provider-gate.mjs",
     "avatar:real-tts-provider-evaluation-gate": "node scripts/avatar/real-tts-provider-evaluation-gate.mjs",
-    "avatar:local-pcm-fixture-provider-gate": "node scripts/avatar/local-pcm-fixture-provider-gate.mjs"
+    "avatar:local-pcm-fixture-provider-gate": "node scripts/avatar/local-pcm-fixture-provider-gate.mjs",
+    "avatar:tts-dependency-spike-gate": "node scripts/avatar/tts-dependency-spike-gate.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]
