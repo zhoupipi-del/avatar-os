@@ -35,3 +35,6 @@ export * from "./kokoro-provider-spike";
 export * from "./kokoro-formant-pipeline-spike";
 export * from "./kokoro-install-compatibility";
 export * from "./kokoro-model-smoke";
+export * from "./kokoro-output-normalizer";
+export * from "./kokoro-access-diagnostics";
+export * from "./kokoro-normalized-formant-pipeline";

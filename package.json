@@ -22,7 +22,8 @@
     "avatar:tts-dependency-spike-gate": "node scripts/avatar/tts-dependency-spike-gate.mjs",
     "avatar:kokoro-provider-spike-gate": "node scripts/avatar/kokoro-provider-spike-gate.mjs",
     "avatar:kokoro-install-compatibility-gate": "node scripts/avatar/kokoro-install-compatibility-gate.mjs",
-    "avatar:kokoro-model-smoke-gate": "node scripts/avatar/kokoro-model-smoke-gate.mjs"
+    "avatar:kokoro-model-smoke-gate": "node scripts/avatar/kokoro-model-smoke-gate.mjs",
+    "avatar:kokoro-output-normalizer-gate": "node scripts/avatar/kokoro-output-normalizer-gate.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]
