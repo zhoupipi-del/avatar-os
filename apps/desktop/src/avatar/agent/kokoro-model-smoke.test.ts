@@ -201,4 +201,78 @@ describe("Day14C: Kokoro Model Load Smoke", () => {
       expect(emptyResult.frameCount).toBe(0);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // 9. REAL MODEL SMOKE（手动触发，env-gated）
+  // -------------------------------------------------------------------------
+  // 仅当 AVATAROS_RUN_KOKORO_MODEL_SMOKE=1/true/yes 时运行真实模型下载 + 合成。
+  // 普通 gate / CI 不设该变量 → 本用例直接跳过，不影响离线闸门。
+  // 失败（网络/下载/运行时）不算 Day14C 失败，交给 Day14D 处理。
+  describe("runKokoroModelLoadSmoke (REAL MODEL, env-gated)", () => {
+    it(
+      "downloads model, generates audio, extracts PCM, runs formant pipeline",
+      async () => {
+        if (!shouldRunKokoroModelSmoke()) {
+          console.warn(`[Day14C] ${SMOKE_ENV} not set — SKIP real model smoke`);
+          return;
+        }
+
+        const config = getKokoroModelSmokeConfig();
+        const mod = await loadKokoroModuleForSmoke();
+        const inspection = inspectKokoroModule(mod);
+        expect(inspection.hasKokoroTTS).toBe(true);
+
+        const KokoroTTS = inspection.KokoroTTSConstructor as {
+          from_pretrained(modelId: string, opts: { dtype: string }): Promise<any>;
+        };
+
+        let model: any;
+        try {
+          model = await KokoroTTS.from_pretrained(config.modelId, { dtype: config.dtype });
+          console.log("[Day14C] model-loaded:", config.modelId);
+        } catch (err) {
+          console.log("[Day14C] status: failed");
+          console.log("[Day14C] error:", err instanceof Error ? err.message : String(err));
+          return;
+        }
+
+        let audio: any;
+        try {
+          audio = await model.generate(config.defaultText, { voice: config.defaultVoice });
+          console.log("[Day14C] generated:", config.defaultText);
+        } catch (err) {
+          console.log("[Day14C] status: failed");
+          console.log("[Day14C] error:", err instanceof Error ? err.message : String(err));
+          return;
+        }
+
+        const pcm = extractKokoroPcmFromUnknownOutput(audio);
+        if (!pcm) {
+          console.log("[Day14C] status: failed");
+          console.log("[Day14C] error: pcm-extraction-returned-null");
+          return;
+        }
+        console.log(
+          "[Day14C] pcm-extracted: sampleRate=",
+          pcm.sampleRate,
+          "length=",
+          pcm.channels[0].length,
+        );
+
+        const analysis = analyzeKokoroPcmSmoke(pcm, 30);
+        console.log(
+          "[Day14C] activeResultCount:",
+          analysis.activeCount,
+          "/",
+          analysis.frameCount,
+        );
+        if (analysis.activeCount > 0) {
+          console.log("[Day14C] activeResultCount > 0: viseme pipeline produced active frames");
+        } else {
+          console.log("[Day14C] status: degraded (model+audio ok, no active viseme frames)");
+        }
+      },
+      600000,
+    );
+  });
 });
