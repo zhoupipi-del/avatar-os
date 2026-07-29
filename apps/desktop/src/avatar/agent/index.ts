@@ -31,3 +31,5 @@ export * from "./pcm-spectrum-source";
 export * from "./local-pcm-fixture-tts-provider";
 export * from "./local-pcm-formant-pipeline";
 export * from "./tts-dependency-spike";
+export * from "./kokoro-provider-spike";
+export * from "./kokoro-formant-pipeline-spike";

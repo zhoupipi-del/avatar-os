@@ -196,16 +196,17 @@ WebAudioSpectrumSource(pullFrequencyData 注入) → getFrequencyData() → Form
 - ❌ 新模块不反向 import runtime / writer / driver（gate 校验）
 - ❌ 生产代码不得出现 `getByteFrequencyData`（只允许测试 fake 注入；真实接线推迟到 Day13）
 
-## 10. Day13 路线（真实 TTS provider 选择，待 BOSS 拍板）
+## 10. Day13→Day14 路线（真实 TTS provider 接入，待 BOSS 拍板）
 
 | 阶段 | 内容 | 前置 |
 |------|------|------|
 | **Day13A（已完成）** | Audio Fixture Provider：用循环频谱帧（CyclingFrequencySpectrumSource）模拟"可分析音频播放"，串 Day11A provider + Day11C source + Day12 probe 成测试闭环。**不解码 WAV / 不接真实 TTS** | Day12 bridge |
 | **Day13B（已完成）** | Real TTS Provider 评估：对 edge / kokoro / piper 三候选做许可证/运行时/打包/离线/浏览器/音频输出评估与排序，产出决策矩阵 + 最小 spike 建议。**不接产品 runtime、不引入真实 TTS 包** | Day13A 链路 |
-| **Day13C（本步）** | Local PCM Fixture Provider：用合成元音 PCM（f1/f2 共振峰模型）→ 纯 TS FFT → 频域幅度 → formant 分析，证明"类真实音频数据链路"。**不接真实 TTS、不接产品 runtime** | Day13A 链路 |
+| **Day13C（已完成）** | Local PCM Fixture Provider：用合成元音 PCM（f1/f2 共振峰模型）→ 纯 TS FFT → 频域幅度 → formant 分析，证明"类真实音频数据链路"。**不接真实 TTS、不接产品 runtime** | Day13A 链路 |
 | **Day13D（已完成）** | TTS Dependency Spike：对 kokoro / piper 两候选做依赖可行性评估（包能否安装 / 浏览器运行 / 离线 / PCM 输出 / 中文音色 / 打包与运行时风险），产出决策矩阵 + Day14 推荐。**不安装真实包、不接产品 runtime、不驱动嘴** | Day13C 链路 |
+| **Day14A（本步）** | Kokoro Provider Minimal Spike：用动态 import 探测 `kokoro-js`（1.2.1, Apache-2.0）做最小实现探针，真实合成路径完整实现但 graceful fallback（未实际安装包，避免 lockfile 污染与模型下载硬失败），证明 kokoro→PCM→Day13C formant 链路可接。**不接产品 runtime、不驱动 VOID 嘴型** | Day13C 链路 |
 
-建议顺序（BOSS 拍板）：**先用 Day13A fixture provider（循环帧）证明链路，再用 Day13C PCM fixture 证明类真实音频数据链路，再用 Day13D 评估真实 TTS 依赖可行性，最后接真实 TTS（Day14）**。
+建议顺序（BOSS 拍板）：**先用 Day13A fixture provider（循环帧）证明链路，再用 Day13C PCM fixture 证明类真实音频数据链路，再用 Day13D 评估真实 TTS 依赖可行性，再用 Day14A 把 kokoro 接进 Day13C 频谱管线（最小探针），后续 Day14B/C 稳定化，Day15 再接产品 runtime**。
 
 ## 11. Day13A — Audio Fixture TTS Provider（测试闭环，不接真实 TTS）
 
@@ -251,7 +252,10 @@ AudioFixtureTtsProvider.speak(text)
 - **Day13B（已完成）**：Real TTS Provider 评估决策模块（`real-tts-provider-decision.ts`）+ 决策文档（`day13-real-tts-provider-evaluation.md`）。当前推荐 `kokoro` 居首，`piper` 紧随，二者均为本地/MIT/离线；`edge` 因在线+高许可证风险排末位。
 - **Day13C（已完成）**：Local PCM Fixture Provider —— 用合成元音 PCM（f1/f2 共振峰模型）→ 纯 TS radix-2 FFT → 频域幅度 → formant 分析，证明"类真实音频数据链路"（PCM → AudioTtsProvider → PcmSpectrumSource → FormantVisemeRuntimeProbe → aa/ih/ou/ee/oh）。不接真实 TTS、不接产品 runtime、不驱动嘴。
 - **Day13D（已完成）**：TTS Dependency Spike —— 对 kokoro / piper 两候选做依赖可行性评估（`tts-dependency-spike.ts`），回答五个核心问题：包能否安装 / 模型如何加载 / 中文能否出声 / 输出能否拿到 PCM 或 buffer / 能否接 Day13C 频谱管线。当前推荐 kokoro 居首（浏览器优先、风险更低），piper 次之（原生 PCM 输出但浏览器兼容性待验证）。**不安装真实包、不接产品 runtime、不驱动嘴**。
-- **Day14（待拍板）**：选一个 provider（kokoro 优先）做最小实现 —— 安装包 → 加载中文音色 → 验证 PCM 输出 → 接 Day13C 频谱管线。仍不接产品 runtime、不驱动 VOID 嘴型。
+- **Day14A（已完成）**：Kokoro Provider Minimal Spike —— `kokoro-provider-spike.ts`（动态 import 探测 `kokoro-js`，真实合成链路完整实现 + graceful fallback）+ `kokoro-formant-pipeline-spike.ts`（speakAndAnalyze 接 Day13C formant）。**未实际安装 kokoro-js**（避免 lockfile 污染 + 模型下载硬失败），provider 真实路径代码已就位；本机默认走 fallback 不抛错。不接产品 runtime、不驱动嘴。
+- **Day14B（待拍板）**：Kokoro Provider Hardening —— 若要在本机端到端实跑，执行 `pnpm --filter desktop add kokoro-js` 并下载模型权重，加固音色选择/采样率适配/错误分类。
+- **Day14C（待拍板）**：Kokoro → PCM → Formant pipeline 稳定化。
+- **Day15（待拍板）**：再考虑接产品 runtime（让 VOID 真实嘴型动起来）。
 
 ## 12. Day13C — Local PCM Fixture Provider（合成 PCM → FFT → formant，不接真实 TTS）
 
@@ -331,6 +335,7 @@ Day13D 是 Day13B（real-tts-provider-decision）的下游细化：Day13B 做三
 - ❌ Day13D gate 的禁用词扫描**仅限本 milestone 新增的 2 个 .ts 文件**（kokoro / piper 作为候选标识符允许出现；禁止的是真实包名 kokoro-js / piper-tts / edge-tts）
 
 ### 下一步（Day14，待 BOSS 拍板）
-- **Day14A**：选一个 provider（kokoro 优先）做最小实现 —— 安装包 → 加载中文音色 → 验证 PCM 输出 → 接 Day13C 频谱管线
-- **Day14B**：把真实 provider 输出接 Local PCM / Formant pipeline
-- **Day15**：再考虑接产品 runtime（让 VOID 嘴动）
+- **Day14A（已完成）**：Kokoro Provider Minimal Spike —— 动态 import 探测 `kokoro-js`（1.2.1, Apache-2.0），真实合成链路已就位 + graceful fallback；未实际安装包（见上文理由）。详见 `day14a-kokoro-provider-spike.md`。
+- **Day14B**：Kokoro Provider Hardening / 或若 kokoro 失败则 Piper Provider Minimal Spike。
+- **Day14C**：Kokoro → PCM → Formant pipeline 稳定化。
+- **Day15**：再考虑接产品 runtime（让 VOID 嘴动）。
