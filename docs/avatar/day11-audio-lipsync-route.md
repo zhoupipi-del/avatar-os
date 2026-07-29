@@ -205,9 +205,10 @@ WebAudioSpectrumSource(pullFrequencyData 注入) → getFrequencyData() → Form
 | **Day13C（已完成）** | Local PCM Fixture Provider：用合成元音 PCM（f1/f2 共振峰模型）→ 纯 TS FFT → 频域幅度 → formant 分析，证明"类真实音频数据链路"。**不接真实 TTS、不接产品 runtime** | Day13A 链路 |
 | **Day13D（已完成）** | TTS Dependency Spike：对 kokoro / piper 两候选做依赖可行性评估（包能否安装 / 浏览器运行 / 离线 / PCM 输出 / 中文音色 / 打包与运行时风险），产出决策矩阵 + Day14 推荐。**不安装真实包、不接产品 runtime、不驱动嘴** | Day13C 链路 |
 | **Day14A（已完成）** | Kokoro Provider Minimal Spike：用动态 import 探测 `kokoro-js`（1.2.1, Apache-2.0）做最小实现探针，真实合成路径完整实现但 graceful fallback（未实际安装包），证明 kokoro→PCM→Day13C formant 链路可接。**不接产品 runtime、不驱动 VOID 嘴型** | Day13C 链路 |
-| **Day14B（本步）** | Kokoro Install Compatibility Spike：**真正安装 `kokoro-js@1.2.1`**，验证它装进 monorepo 不破坏依赖树、vite build 不被 onnxruntime/wasm 打爆、desktop/root vitest 稳定通过、动态 import 能 resolve。本阶段禁用 `from_pretrained`（不下载模型、不真实合成）。**不接产品 runtime、不驱动 VOID 嘴型** | Day14A 链路 |
+| **Day14B（已完成）** | Kokoro Install Compatibility Spike：**真正安装 `kokoro-js@1.2.1`**，验证它装进 monorepo 不破坏依赖树、vite build 不被 onnxruntime/wasm 打爆、desktop/root vitest 稳定通过、动态 import 能 resolve。本阶段禁用 `from_pretrained`（不下载模型、不真实合成）。**不接产品 runtime、不驱动 VOID 嘴型** | Day14A 链路 |
+| **Day14C（本步）** | Kokoro Model Load Smoke：**第一次允许 `from_pretrained` / `generate` 真实合成**。下载 `onnx-community/Kokoro-82M-v1.0` 权重 → 短句合成 → 防御性提取 PCM → 接 `PcmSpectrumSource` → 接 `FormantVisemeRuntimeProbe`。真实模型加载用环境变量 `AVATAROS_RUN_KOKORO_MODEL_SMOKE` 门控，不进普通 gate / CI。**不接产品 runtime、不驱动 VOID 嘴型** | Day14B 链路 |
 
-建议顺序（BOSS 拍板）：**先用 Day13A fixture provider（循环帧）证明链路，再用 Day13C PCM fixture 证明类真实音频数据链路，再用 Day13D 评估真实 TTS 依赖可行性，再用 Day14A 把 kokoro 接进 Day13C 频谱管线（最小探针），再用 Day14B 真安装验证兼容性，后续 Day14C 模型加载冒烟 + 稳定化，Day15 再接产品 runtime**。
+建议顺序（BOSS 拍板）：**先用 Day13A fixture provider（循环帧）证明链路，再用 Day13C PCM fixture 证明类真实音频数据链路，再用 Day13D 评估真实 TTS 依赖可行性，再用 Day14A 把 kokoro 接进 Day13C 频谱管线（最小探针），再用 Day14B 真安装验证兼容性，Day14C 模型加载冒烟，后续 Day14D 稳定化，Day15 再接产品 runtime**。
 
 ## 11. Day13A — Audio Fixture TTS Provider（测试闭环，不接真实 TTS）
 
@@ -255,7 +256,7 @@ AudioFixtureTtsProvider.speak(text)
 - **Day13D（已完成）**：TTS Dependency Spike —— 对 kokoro / piper 两候选做依赖可行性评估（`tts-dependency-spike.ts`），回答五个核心问题：包能否安装 / 模型如何加载 / 中文能否出声 / 输出能否拿到 PCM 或 buffer / 能否接 Day13C 频谱管线。当前推荐 kokoro 居首（浏览器优先、风险更低），piper 次之（原生 PCM 输出但浏览器兼容性待验证）。**不安装真实包、不接产品 runtime、不驱动嘴**。
 - **Day14A（已完成）**：Kokoro Provider Minimal Spike —— `kokoro-provider-spike.ts`（动态 import 探测 `kokoro-js`，真实合成链路完整实现 + graceful fallback）+ `kokoro-formant-pipeline-spike.ts`（speakAndAnalyze 接 Day13C formant）。**未实际安装 kokoro-js**（避免 lockfile 污染 + 模型下载硬失败），provider 真实路径代码已就位；本机默认走 fallback 不抛错。不接产品 runtime、不驱动嘴。
 - **Day14B（本步，已完成）**：Kokoro Install Compatibility Spike —— **真正安装 `kokoro-js@1.2.1`（Apache-2.0）**。`kokoro-install-compatibility.ts`（`getKokoroInstallCompatibility` / `tryResolveKokoroModule` / `assertKokoroModelLoadDisabled`）+ 8 项测试全绿。`pnpm --filter desktop add kokoro-js` 干净落库；四道基础闸门（tsc / vite build / desktop vitest 166 / root vitest 226）全绿；动态 import 实际 resolve 到已安装包；本阶段禁用 `from_pretrained`（不下载模型、不真实合成）。配套修复 `pnpm-workspace.yaml` 的 `allowBuilds` 占位符为显式 `false`。不接产品 runtime、不驱动嘴。
-- **Day14C（待拍板）**：Kokoro Model Load Smoke —— 仅此刻才允许 `from_pretrained` / `generate`：下载 `onnx-community/Kokoro-82M-v1.0` 权重 → 中文短句合成 → 取 PCM → 接 `PcmSpectrumSource` → 接 `FormantVisemeRuntimeProbe`。若 Day14B 因依赖树/vite 打包失败则转 Piper Install Compatibility Spike。
+- **Day14C（已完成）**：Kokoro Model Load Smoke —— 仅此刻才允许 `from_pretrained` / `generate`：下载 `onnx-community/Kokoro-82M-v1.0` 权重 → 短句合成 → 防御性提取 PCM → 接 `PcmSpectrumSource` → 接 `FormantVisemeRuntimeProbe`。真实模型加载用 `AVATAROS_RUN_KOKORO_MODEL_SMOKE` 环境变量门控。
 - **Day14D（待拍板）**：Kokoro → PCM → Formant pipeline 稳定化。
 - **Day15（待拍板）**：再考虑接产品 runtime（让 VOID 真实嘴型动起来）。
 
@@ -339,6 +340,6 @@ Day13D 是 Day13B（real-tts-provider-decision）的下游细化：Day13B 做三
 ### 下一步（Day14，待 BOSS 拍板）
 - **Day14A（已完成）**：Kokoro Provider Minimal Spike —— 动态 import 探测 `kokoro-js`（1.2.1, Apache-2.0），真实合成链路已就位 + graceful fallback；未实际安装包。详见 `day14a-kokoro-provider-spike.md`。
 - **Day14B（已完成）**：Kokoro Install Compatibility Spike —— 真安装 `kokoro-js@1.2.1`，验证四道基础闸门 + 动态 import resolve 全绿，本阶段禁用模型加载。详见 `day14b-kokoro-install-compatibility.md`。
-- **Day14C**：Kokoro Model Load Smoke（才允许 `from_pretrained` / `generate` 真实合成 + 接 formant pipeline）。
-- **Day14D**：Kokoro → PCM → Formant pipeline 稳定化。
-- **Day15**：再考虑接产品 runtime（让 VOID 嘴动）。
+- **Day14C（已完成）**：Kokoro Model Load Smoke —— 第一次允许 `from_pretrained` / `generate` 真实合成。`kokoro-model-smoke.ts`（7 个函数：config / env 门控 / 模块加载 / 模块检查 / 真实冒烟 / 防御性 PCM 提取 / formant 分析）+ 8 项测试全绿。真实模型加载用 `AVATAROS_RUN_KOKORO_MODEL_SMOKE` 环境变量门控，不进普通 gate / CI。详见 `day14c-kokoro-model-load-smoke.md`。
+- **Day14D（待拍板）**：Kokoro → PCM → Formant pipeline 稳定化（输出归一化 / 边界处理 / 性能优化）。若 Day14C 真实 smoke 失败则转 Failure Report + Piper。
+- **Day15（待拍板）**：再考虑接产品 runtime（让 VOID 真实嘴型动起来）。

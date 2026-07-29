@@ -34,3 +34,4 @@ export * from "./tts-dependency-spike";
 export * from "./kokoro-provider-spike";
 export * from "./kokoro-formant-pipeline-spike";
 export * from "./kokoro-install-compatibility";
+export * from "./kokoro-model-smoke";
