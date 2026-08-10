@@ -16,6 +16,7 @@ import { PresenceSensorLayer } from "@avatar-os/sensor";
 import { setClickThrough } from "./window/window-state";
 import { createCognitionDriver } from "./cognition/cognitionDriver";
 import { DebugConsole } from "./debug/DebugConsole";
+import { DemoModeToggle } from "./demo/DemoModeToggle";
 import { AnimationInspector } from "./avatar/skins/AnimationInspector";
 import { avatarService, attachAvatarPersistence, IN_MEMORY_AVATAR_STORAGE } from "./avatar/avatar-profiles";
 import { createTauriRelationshipRepository, attachRelationshipCloseHandler } from "./persistence/tauri-relationship-repository";
@@ -136,6 +137,7 @@ export default function App() {
     >
       {inspect ? <AnimationInspector /> : <Avatar />}
       {import.meta.env.DEV && <DebugConsole />}
+      {import.meta.env.DEV && <DemoModeToggle />}
     </main>
   );
 }

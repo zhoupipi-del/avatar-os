@@ -649,3 +649,78 @@
 .avatar-text-viseme-status strong {
   color: rgba(255, 255, 255, 0.96);
 }
+
+/* ============================================================
+   Day15A — Demo Status Bar & Mode Toggle
+   ============================================================ */
+.avatar-demo-status-bar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(16, 18, 28, 0.62);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.avatar-demo-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.avatar-demo-status-chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 180, 80, 0.95);
+}
+
+.avatar-demo-status-chip--ok {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.avatar-demo-status-chip--ok .avatar-demo-status-chip__dot {
+  background: rgba(110, 220, 150, 0.95);
+}
+
+.avatar-demo-status-chip--wait .avatar-demo-status-chip__dot {
+  background: rgba(255, 180, 80, 0.95);
+}
+
+.avatar-demo-mode-toggle {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 60;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(18, 18, 24, 0.7);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.avatar-demo-mode-toggle:hover {
+  background: rgba(28, 28, 36, 0.85);
+}
+
+.avatar-demo-mode-toggle--active {
+  background: rgba(120, 200, 255, 0.92);
+  color: rgba(20, 20, 26, 0.96);
+}

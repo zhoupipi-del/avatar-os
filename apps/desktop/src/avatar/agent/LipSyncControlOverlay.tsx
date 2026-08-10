@@ -15,6 +15,7 @@ export interface LipSyncControlOverlayProps {
   readonly getManager: () => LipSyncExpressionManagerLike | null;
   readonly status?: TextVisemeExpressionDriverStatus | null;
   readonly lipProbe?: LipShapeProbeResult | null;
+  readonly showDebug?: boolean;
 }
 
 export function LipSyncControlOverlay({
@@ -22,6 +23,7 @@ export function LipSyncControlOverlay({
   getManager,
   status,
   lipProbe,
+  showDebug,
 }: LipSyncControlOverlayProps) {
   const initial = driver?.getOptions();
   const [enabled, setEnabledState] = useState(initial?.enabled ?? true);
@@ -105,6 +107,7 @@ export function LipSyncControlOverlay({
         onChange={handleReleaseChange}
       />
 
+      {showDebug && (
       <div className="avatar-lipsync-control__debug">
         <div>enabled: {String(status?.enabled ?? false)}</div>
         <div>active: {String(writer?.active ?? false)}</div>
@@ -123,6 +126,7 @@ export function LipSyncControlOverlay({
             : "probing…"}
         </div>
       </div>
+      )}
     </div>
   );
 }

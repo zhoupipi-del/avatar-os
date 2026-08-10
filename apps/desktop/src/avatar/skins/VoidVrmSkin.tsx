@@ -44,6 +44,8 @@ import {
 import { calculateVisibleMeshFrame, type VrmFrameTransform } from "../vrm/vrm-framing";
 import { VOID_AVATAR_PROFILE } from "../void-avatar-profile";
 import type { SkinProps } from "./types";
+import { useAdvancedDebug } from "../../demo/demo-runtime";
+import { DemoStatusBar } from "../../demo/DemoStatusBar";
 import {
   AgentInputOverlay,
   AgentRuntime,
@@ -256,6 +258,7 @@ function VoidModel({
   onLipSyncStatusChange,
   onRhythmStatusChange,
   onTextVisemeStatusChange,
+  onVrmLoadedChange,
   engineRef,
 }: {
   mood: SkinProps["mood"];
@@ -265,6 +268,7 @@ function VoidModel({
   onLipSyncStatusChange?: (status: LipSyncNoopStatus | null) => void;
   onRhythmStatusChange?: (status: LipSyncRhythmStatus | null) => void;
   onTextVisemeStatusChange?: (status: TextVisemeExpressionDriverStatus | null) => void;
+  onVrmLoadedChange?: (loaded: boolean) => void;
   engineRef: MutableRefObject<VrmEngine | null>;
 }) {
   const [vrm, setVrm] = useState<import("@pixiv/three-vrm").VRM | null>(null);
@@ -285,6 +289,7 @@ function VoidModel({
           return;
         }
         setVrm(loaded);
+        onVrmLoadedChange?.(true);
       })
       .catch((err) => {
         console.error("[VOID] Failed to load VRM:", err);
@@ -672,8 +677,38 @@ export function VoidVrmSkin({ mood }: SkinProps) {
   const [textVisemeStatus, setTextVisemeStatus] = useState<TextVisemeExpressionDriverStatus | null>(null);
   const engineRef = useRef<VrmEngine | null>(null);
 
+  // Day15A：演示模式开关（仅控制调试可见性，不碰音频/表情/嘴型算法）
+  const showDebug = useAdvancedDebug();
+  const [brainReady, setBrainReady] = useState(false);
+  const ttsAvailable = !!tts && tts.getStatus().available;
+  const lipAvailable = !!lipProbe && lipProbe.available;
+  const [vrmLoaded, setVrmLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      if (cancelled) return;
+      const agent = (window as unknown as { __avatarOSAgent?: unknown }).__avatarOSAgent;
+      setBrainReady(Boolean(agent));
+      if (!agent) {
+        window.setTimeout(check, 400);
+      }
+    };
+    check();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="avatar-vrm-stage">
+      <DemoStatusBar
+        vrmLoaded={vrmLoaded}
+        brainReady={brainReady}
+        ttsAvailable={ttsAvailable}
+        lipAvailable={lipAvailable}
+        viteConnected={import.meta.env.DEV}
+      />
       <Canvas
         camera={{ position: [0, VOID_AVATAR_PROFILE.fitHeight * 0.3, 5], fov: 35 }}
         gl={{ alpha: true, antialias: true, premultipliedAlpha: false }}
@@ -691,6 +726,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
             onLipSyncStatusChange={setLipSyncStatus}
             onRhythmStatusChange={setRhythmStatus}
             onTextVisemeStatusChange={setTextVisemeStatus}
+            onVrmLoadedChange={setVrmLoaded}
             engineRef={engineRef}
           />
         </Suspense>
@@ -705,15 +741,16 @@ export function VoidVrmSkin({ mood }: SkinProps) {
         }}
       />
 
-      <VoiceControlOverlay tts={tts} lipProbe={lipProbe} />
+      <VoiceControlOverlay tts={tts} lipProbe={lipProbe} showDebug={showDebug} />
       <LipSyncControlOverlay
         driver={engineRef.current?.textVisemeExpression ?? null}
         getManager={() => engineRef.current?.vrm?.expressionManager ?? null}
         status={textVisemeStatus}
         lipProbe={lipProbe}
+        showDebug={showDebug}
       />
 
-      {lipSyncStatus ? (
+      {showDebug && lipSyncStatus ? (
         <div className="avatar-lip-sync-status">
           <div>
             LipSync: <strong>{lipSyncStatus.mode}</strong>
@@ -727,7 +764,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
         </div>
       ) : null}
 
-      {rhythmStatus ? (
+      {showDebug && rhythmStatus ? (
         <div className="avatar-lip-rhythm-status">
           <div>
             Rhythm: <strong>{rhythmStatus.phase}</strong>
@@ -744,7 +781,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
         </div>
       ) : null}
 
-      {textVisemeStatus ? (
+      {showDebug && textVisemeStatus ? (
         <div className="avatar-text-viseme-status">
           <div>
             Text Viseme:{" "}
