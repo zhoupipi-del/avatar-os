@@ -112,6 +112,7 @@ describe("BehaviorVMAdapter", () => {
 
   const maps = {
     idleClip: "NlaTrack",
+    spineBone: "Spine01",
     intentClip: { GREET: "NlaTrack.001", BOUNCE_HAPPY: "NlaTrack.002" } as Record<string, string>,
     statusClip: { success: "NlaTrack.002", error: "NlaTrack.001" } as Record<string, string>,
   };

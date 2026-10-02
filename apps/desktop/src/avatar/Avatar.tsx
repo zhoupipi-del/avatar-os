@@ -26,7 +26,7 @@ import {
   type SystemStatus,
 } from "@avatar-os/morphology";
 import { ThoughtBubble } from "./components/ThoughtBubble";
-import { StandardAvatarSkin, VoidVrmSkin } from "./skins/SkinRegistry";
+import { SKIN_REGISTRY, CURRENT_SKIN_ID, setSkin, StandardAvatarSkin, VoidVrmSkin } from "./skins/SkinRegistry";
 import { gazeBus } from "./skins/gazeBus";
 import { avatarService, resolveAvatarProfile } from "./avatar-profiles";
 import { VOID_AVATAR_PROFILE } from "./void-avatar-profile";
@@ -77,6 +77,8 @@ export function Avatar() {
   // 当前激活身体：经 avatarService(事实源) → avatar-profiles 目录解析。
   // 不直接写死 BAG_CONFIG，所有权上提到 runtime。
   const { id: activeAvatarId, config: avatarConfig } = useActiveAvatarConfig();
+  // 当前激活皮肤（控制台可热切换，注册表驱动）
+  const [skinId, setSkinId] = useState<string>(CURRENT_SKIN_ID);
   // 最新渲染参数引用：供 mousemove 闭包读取，避免重注册监听
   const renderRef = useRef<RenderParams>(DEFAULT_RENDER);
 
@@ -141,6 +143,16 @@ export function Avatar() {
 
     // 启动想法气泡中继(情绪/意图/系统状态 → AVATAR_THOUGHT)
     const unbindRelay = initThoughtRelay();
+
+    // 皮肤热切换：控制台 window.__AVATAR_DEV__.setSkin('classic-2d'|'mecha-core'|'frieza-3d')
+    const onSkinChange = (e: Event) =>
+      setSkinId((e as CustomEvent<string>).detail);
+    window.addEventListener("avatar-skin-change", onSkinChange as EventListener);
+    // 暴露调试句柄：setSkin 切皮肤，setMood 直接驱动情绪（演示 3D 情绪色渐变）
+    (window as Window & typeof globalThis & { __AVATAR_DEV__?: unknown }).__AVATAR_DEV__ = {
+      setSkin,
+      setMood: (m: Mood) => eventBus.emit("STATE_MOOD_CHANGED", { mood: m }),
+    };
 
     const unbindMood = eventBus.on("STATE_MOOD_CHANGED", (p) => setMood(p.mood));
     const unbindMotion = eventBus.on("STATE_MOTION_CHANGED", (p) => setMotion(p.motion));
@@ -372,6 +384,7 @@ export function Avatar() {
     return () => {
       unbindRelay();
       unbindMood();
+      window.removeEventListener("avatar-skin-change", onSkinChange as EventListener);
       unbindMotion();
       unbindRender();
       unbindStatus();
@@ -384,11 +397,20 @@ export function Avatar() {
     };
   }, []);
 
+  const ActiveSkin = SKIN_REGISTRY[skinId] ?? SKIN_REGISTRY[CURRENT_SKIN_ID];
+
   return (
     <div className="avatar-root" ref={containerRef}>
       <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
-        {activeAvatarId === VOID_AVATAR_PROFILE.id ? (
+        {ActiveSkin ? (
+          <ActiveSkin
+            mood={mood}
+            motion={motion}
+            frame={frame}
+            eyeOpenRatio={render.eyeOpenRatio}
+          />
+        ) : activeAvatarId === VOID_AVATAR_PROFILE.id ? (
           <VoidVrmSkin mood={mood} />
         ) : (
           <StandardAvatarSkin mood={mood} config={avatarConfig} />

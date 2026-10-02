@@ -44,3 +44,6 @@ coverage/
 
 # ===== TypeScript 增量编译缓存 =====
 *.tsbuildinfo
+
+# 3D 模型二进制(本地资产，不入库)
+*.glb

@@ -137,7 +137,10 @@ describe("applyEmotionToTraits · 调制", () => {
     const extreme: EmotionState = { comfort: 1, trust: 1, loneliness: 1, curiosity: 1 };
     const out = applyEmotionToTraits(t, extreme);
     expect(clampTraits(out)).toEqual(out); // 已在范围内
-    for (const v of Object.values(out)) expect(v).toBeGreaterThanOrEqual(0) && expect(v).toBeLessThanOrEqual(1);
+    for (const v of Object.values(out)) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
   });
 });
 
