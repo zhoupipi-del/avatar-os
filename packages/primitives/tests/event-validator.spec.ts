@@ -71,3 +71,54 @@ describe("validateKernelEvent — 运行时事件门禁", () => {
     expect(validateKernelEvent("string")).toBe(false);
   });
 });
+
+// ============================================================
+// 新增载荷语义门禁（R7 演进）：MEMORY_APPEND / AVATAR_THOUGHT(kind) 白名单
+// ============================================================
+describe("validateKernelEvent — 新增载荷语义门禁", () => {
+  test("合法 MEMORY_APPEND 通过校验", () => {
+    const evt = makeKernelEvent("MEMORY_APPEND", "AI", {
+      source: "user",
+      content: "你好",
+      timestamp: Date.now(),
+    });
+    expect(validateKernelEvent(evt)).toBe(true);
+  });
+
+  test("MEMORY_APPEND 缺 content 被拒绝", () => {
+    const evt = makeKernelEvent("MEMORY_APPEND", "AI", {
+      source: "user",
+      timestamp: Date.now(),
+    } as unknown as Parameters<typeof makeKernelEvent>[2]);
+    expect(validateKernelEvent(evt)).toBe(false);
+  });
+
+  test("MEMORY_APPEND 非法 source 被拒绝", () => {
+    const evt = makeKernelEvent("MEMORY_APPEND", "AI", {
+      source: "alien",
+      content: "x",
+      timestamp: Date.now(),
+    } as unknown as Parameters<typeof makeKernelEvent>[2]);
+    expect(validateKernelEvent(evt)).toBe(false);
+  });
+
+  test("合法 AVATAR_THOUGHT(speech/thinking/thought) 通过校验", () => {
+    for (const kind of ["speech", "thinking", "thought", "state"] as const) {
+      const evt = makeKernelEvent("AVATAR_THOUGHT", "AI", { emoji: "💬", text: "hi", kind });
+      expect(validateKernelEvent(evt)).toBe(true);
+    }
+  });
+
+  test("AVATAR_THOUGHT 非法 kind 被拒绝", () => {
+    const evt = makeKernelEvent("AVATAR_THOUGHT", "AI", {
+      text: "hi",
+      kind: "bogus",
+    } as unknown as Parameters<typeof makeKernelEvent>[2]);
+    expect(validateKernelEvent(evt)).toBe(false);
+  });
+
+  test("AVATAR_THOUGHT clear 无 content 也通过校验", () => {
+    const evt = makeKernelEvent("AVATAR_THOUGHT", "AI", { kind: "clear" });
+    expect(validateKernelEvent(evt)).toBe(true);
+  });
+});

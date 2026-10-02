@@ -19,6 +19,11 @@ import {
   clamp01,
 } from "@avatar-os/primitives";
 
+// 肢体运动学：纯函数层(鼠标引力 / 键盘打字 / 布娃娃弹簧 / 系统状态映射)
+export * from "./limb-kinematics";
+// 随机行为树：空闲微动作纯函数层(歪头/张望/挠头/哈欠/伸懒腰/弹跳/摇摆/扭动)
+export * from "./idle-behaviors";
+
 /** 渲染参数：Morphology 对外的唯一产物 */
 export interface RenderParams {
   /** CSS 动画类 key（与 Body.tsx 的 motion-<key> 对应） */

@@ -7,6 +7,10 @@
     "@avatar-os/primitives": "workspace:*",
     "@avatar-os/memory": "workspace:*",
     "@avatar-os/sensor": "workspace:*",
-    "@avatar-os/morphology": "workspace:*"
+    "@avatar-os/morphology": "workspace:*",
+    "three": "0.169.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.169.0"
   }
 }

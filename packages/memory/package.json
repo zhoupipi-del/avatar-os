@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
-    "@avatar-os/primitives": "workspace:*"
+    "@avatar-os/primitives": "workspace:*",
+    "@tauri-apps/plugin-sql": "^2.4.0"
   }
 }

@@ -40,6 +40,19 @@ export class DriveEngine {
   }
 
   /**
+   * 状态恢复（Snapshot 回填用）。深拷贝入参，避免外部引用污染内部状态。
+   */
+  public restoreState(newState: LifeState): void {
+    this.state = {
+      energy: newState.energy,
+      socialNeed: newState.socialNeed,
+      curiosity: newState.curiosity,
+      pressures: { ...newState.pressures },
+    };
+    console.log("[DriveEngine 🔄] LifeState restored.");
+  }
+
+  /**
    * 自然时钟演算：计算 Need -> Pressure 的动态演化。
    * @returns 演化后的生命状态 + PAD 情绪状态
    */

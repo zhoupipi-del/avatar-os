@@ -1,9 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import { Mood } from "@avatar-os/primitives";
-import { eventBus, avatarFSM } from "@avatar-os/runtime";
+import { listen } from "@tauri-apps/api/event";
+import { eventBus, avatarFSM, initThoughtRelay, kernelEventBus } from "@avatar-os/runtime";
 import { mouseSensor } from "../sensor/MouseSensor";
 import { calculateFrame, VisualFrame } from "../renderer/visual-transform";
-import { Body } from "./components/Body";
+import {
+  SHOULDER_L,
+  SHOULDER_R,
+  clientToSvg,
+  computeArmReachAngle,
+  typingIntensityFromRate,
+  typingPose,
+  scratchHeadPose,
+  stepSpring,
+  dragAccelFromDelta,
+  systemStatusToLimbs,
+  composeLimbAngles,
+  REST_LIMB_ANGLES,
+  IDLE_BEHAVIORS,
+  idlePoseAt,
+  nextIdleDelay,
+  pickIdleBehavior,
+  type IdleBehaviorType,
+  type SpringState,
+  type SystemStatus,
+} from "@avatar-os/morphology";
+import { ThoughtBubble } from "./components/ThoughtBubble";
+import { SKIN_REGISTRY, CURRENT_SKIN_ID, setSkin, StandardAvatarSkin, VoidVrmSkin } from "./skins/SkinRegistry";
+import { gazeBus } from "./skins/gazeBus";
+import { avatarService, resolveAvatarProfile } from "./avatar-profiles";
+import { VOID_AVATAR_PROFILE } from "./void-avatar-profile";
 import "./Avatar.css";
 
 interface RenderParams {
@@ -24,7 +50,20 @@ const DEFAULT_RENDER: RenderParams = {
  * - 动作状态(motion)来自 EventBus 的 STATE_MOTION_CHANGED
  * - 渲染参数(eyeOpenRatio/bodyScale/gazeBias)来自 Morphology 的 STATE_RENDER_PARAMS_CHANGED
  * - 视线偏移(frame.eyeOffset) = 本地鼠标追视(视觉) + Morphology 情绪偏置(gazeBias)
+ * - 肢体角(frame.limbAngles) = 120ms gesture tick 合成(鼠标引力/键盘打字/布娃娃/系统状态)
  */
+/**
+ * 订阅 AvatarService 拿当前激活的 profile id，经 desktop 目录解析为 RigConfig。
+ * UI 不持有 active 状态——只观测 AvatarService 并解析资产（事实在 runtime）。
+ *
+ * V1 新增: void-vrm 格式走 VoidVrmSkin（VRM 加载管线），其余走 StandardAvatarSkin（GLB）。
+ */
+function useActiveAvatarConfig() {
+  const [id, setId] = useState<string>(avatarService.getActiveId());
+  useEffect(() => avatarService.subscribe((s) => setId(s.activeId)), []);
+  return { id, config: resolveAvatarProfile(id).config };
+}
+
 export function Avatar() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [mood, setMood] = useState<Mood>(avatarFSM.getMood().current);
@@ -32,15 +71,88 @@ export function Avatar() {
   const [frame, setFrame] = useState<VisualFrame>({
     eyeOffset: { x: 0, y: 0 },
     bodyScale: 1.0,
+    limbAngles: { ...REST_LIMB_ANGLES },
   });
   const [render, setRender] = useState<RenderParams>(DEFAULT_RENDER);
+  // 当前激活身体：经 avatarService(事实源) → avatar-profiles 目录解析。
+  // 不直接写死 BAG_CONFIG，所有权上提到 runtime。
+  const { id: activeAvatarId, config: avatarConfig } = useActiveAvatarConfig();
+  // 当前激活皮肤（控制台可热切换，注册表驱动）
+  const [skinId, setSkinId] = useState<string>(CURRENT_SKIN_ID);
   // 最新渲染参数引用：供 mousemove 闭包读取，避免重注册监听
   const renderRef = useRef<RenderParams>(DEFAULT_RENDER);
+
+  // ---- 实时输入信号 refs (供 gesture tick 读取, 避免重注册监听) ----
+  const svgCursorRef = useRef<{ x: number; y: number } | null>(null);
+  const keyTimesRef = useRef<number[]>([]); // 近 1s 内按键时间戳
+  const dragRef = useRef<{
+    active: boolean;
+    lastX: number;
+    lastY: number;
+    lastDelta: number;
+    accel: number;
+    springs: { armL: SpringState; armR: SpringState; legL: SpringState; legR: SpringState };
+  }>({
+    active: false,
+    lastX: 0,
+    lastY: 0,
+    lastDelta: 0,
+    accel: 0,
+    springs: {
+      armL: { angle: 0, vel: 0 },
+      armR: { angle: 0, vel: 0 },
+      legL: { angle: 0, vel: 0 },
+      legR: { angle: 0, vel: 0 },
+    },
+  });
+  const statusRef = useRef<SystemStatus>("idle");
+
+  // ---- 随机行为树：空闲微动作调度状态 ----
+  // 萌物无人交互超过 nextDelay 后，随机挑一个空闲小动作播放；
+  // 任何交互(鼠标移动/按键/拖拽)立即取消当前动作并重置计时。
+  interface IdleState {
+    phase: "WAITING" | "PLAYING";
+    type?: IdleBehaviorType;
+    startedAt?: number;
+    nextDelay: number; // 下次触发前的随机等待(ms)
+  }
+  const idleRef = useRef<IdleState>({
+    phase: "WAITING",
+    type: undefined,
+    startedAt: undefined,
+    nextDelay: nextIdleDelay(Math.random),
+  });
+  // 最近一次交互时刻：用于判断"是否空闲足够久"
+  const lastInteractionRef = useRef<number>(Date.now());
+
+  /** 取消正在播放的空闲动作并重置计时（交互发生时调用） */
+  const cancelIdle = () => {
+    const idle = idleRef.current;
+    if (idle.phase === "PLAYING") {
+      idle.phase = "WAITING";
+      idle.type = undefined;
+      idle.startedAt = undefined;
+      idle.nextDelay = nextIdleDelay(Math.random);
+    }
+  };
 
   useEffect(() => {
     if (containerRef.current) {
       mouseSensor.init(containerRef.current);
     }
+
+    // 启动想法气泡中继(情绪/意图/系统状态 → AVATAR_THOUGHT)
+    const unbindRelay = initThoughtRelay();
+
+    // 皮肤热切换：控制台 window.__AVATAR_DEV__.setSkin('classic-2d'|'mecha-core'|'frieza-3d')
+    const onSkinChange = (e: Event) =>
+      setSkinId((e as CustomEvent<string>).detail);
+    window.addEventListener("avatar-skin-change", onSkinChange as EventListener);
+    // 暴露调试句柄：setSkin 切皮肤，setMood 直接驱动情绪（演示 3D 情绪色渐变）
+    (window as Window & typeof globalThis & { __AVATAR_DEV__?: unknown }).__AVATAR_DEV__ = {
+      setSkin,
+      setMood: (m: Mood) => eventBus.emit("STATE_MOOD_CHANGED", { mood: m }),
+    };
 
     const unbindMood = eventBus.on("STATE_MOOD_CHANGED", (p) => setMood(p.mood));
     const unbindMotion = eventBus.on("STATE_MOTION_CHANGED", (p) => setMotion(p.motion));
@@ -53,11 +165,16 @@ export function Avatar() {
       renderRef.current = next;
       setRender(next);
     });
+    const unbindStatus = eventBus.on("SYSTEM_STATUS_CHANGED", (p) => {
+      statusRef.current = p.status;
+    });
 
-    // 视线追踪：纯视觉，50ms 节流，独立于生命状态流；
-    // 最终偏移 = 本地鼠标追视 + Morphology 情绪偏置
+    // 视线追踪 + 鼠标引力光标采集 + 拖拽加速度采集
+    // 统一入口：输入为"视口坐标 (vx, vy)"
+    //  - 窗口内 mousemove：直接给 e.clientX/Y（视口坐标）
+    //  - 全局鼠标钩子：screen 坐标 - window.screenX/Y 转为视口坐标
     let lastTime = 0;
-    const onMove = (e: MouseEvent) => {
+    const applyPointerViewport = (vx: number, vy: number) => {
       const now = Date.now();
       if (now - lastTime < 50) return;
       lastTime = now;
@@ -66,31 +183,238 @@ export function Avatar() {
       const rect = el.getBoundingClientRect();
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
-      const dx = e.clientX - cx;
-      const dy = e.clientY - cy;
+      const dx = vx - cx;
+      const dy = vy - cy;
       const distance = Math.hypot(dx, dy);
       const base = calculateFrame(dx, dy, distance);
 
       const bias = renderRef.current.gazeBias;
-      setFrame({
+      // 函数式更新: 保留 tick 写入的 limbAngles, 避免鼠标移动时肢体角被冲掉
+      setFrame((f) => ({
+        ...f,
         eyeOffset: { x: base.eyeOffset.x + bias.x, y: base.eyeOffset.y + bias.y },
         bodyScale: base.bodyScale * renderRef.current.bodyScale,
-      });
+      }));
+
+      // F1: 光标 → SVG 坐标, 供 gesture tick 算够指针角
+      svgCursorRef.current = clientToSvg(vx, vy, rect);
+
+      // 视线总线：喂给 3D 皮肤头部骨骼做平滑跟随
+      gazeBus.x = base.eyeOffset.x + bias.x;
+      gazeBus.y = base.eyeOffset.y + bias.y;
+
+      // 任何鼠标移动都算"交互"：重置空闲计时并取消正在播放的空闲动作
+      lastInteractionRef.current = now;
+      cancelIdle();
+    };
+
+    const onMove = (e: MouseEvent) => {
+      applyPointerViewport(e.clientX, e.clientY);
+      // F3: 拖拽中 → 由移动差分推导甩动加速度（拖拽只在窗口内发生）
+      const d = dragRef.current;
+      if (d.active) {
+        const mdx = e.clientX - d.lastX;
+        const mdy = e.clientY - d.lastY;
+        const delta = Math.hypot(mdx, mdy);
+        d.accel = dragAccelFromDelta(d.lastDelta, delta, 0.05);
+        d.lastDelta = delta;
+        d.lastX = e.clientX;
+        d.lastY = e.clientY;
+      }
     };
     window.addEventListener("mousemove", onMove);
 
+    // 全局鼠标引力：Rust 端 WH_MOUSE_LL 钩子推送全屏光标坐标，
+    // 让宠物能响应屏幕任意位置的鼠标移动（窗口内 mousemove 只覆盖小窗本身）
+    let unlistenGlobal: (() => void) | undefined;
+    listen<{ x: number; y: number }>("global-mousemove", (event) => {
+      const p = event.payload;
+      applyPointerViewport(p.x - window.screenX, p.y - window.screenY);
+    }).then((fn) => {
+      unlistenGlobal = fn;
+    });
+
+    // F2: 键盘打字强度采集
+    const onKeyDown = () => {
+      keyTimesRef.current.push(performance.now());
+      lastInteractionRef.current = Date.now();
+      cancelIdle();
+    };
+    window.addEventListener("keydown", onKeyDown);
+
+    // F3: 拖拽检测 (仅在 Tauri 拖拽区按下才算抓取)
+    const onMouseDown = (e: MouseEvent) => {
+      const wrap = containerRef.current?.querySelector(".drag-region-wrap");
+      if (wrap && e.target instanceof Node && wrap.contains(e.target)) {
+        const d = dragRef.current;
+        d.active = true;
+        d.lastX = e.clientX;
+        d.lastY = e.clientY;
+        d.lastDelta = 0;
+        // 抓取瞬间给个甩动冲量, 即使原生拖拽暂停 mousemove 也能看到"晃一下"
+        d.springs.armL = { angle: d.springs.armL.angle, vel: 28 };
+        d.springs.armR = { angle: d.springs.armR.angle, vel: -28 };
+        d.springs.legL = { angle: d.springs.legL.angle, vel: 20 };
+        d.springs.legR = { angle: d.springs.legR.angle, vel: -20 };
+      }
+      lastInteractionRef.current = Date.now();
+      cancelIdle();
+    };
+    const onMouseUp = () => {
+      dragRef.current.active = false;
+      dragRef.current.accel = 0;
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
+
+    // ---- gesture tick: 120ms 合成肢体角 (F1/F2/F3/F4 + 随机行为树) ----
+    const tick = window.setInterval(() => {
+      const t = performance.now();
+      const now = Date.now();
+
+      // ===== 随机行为树：空闲微动作调度 =====
+      // 无人交互超过 nextDelay → 随机挑一个动作播放；播放期间接管双臂，
+      // 并冒一个"想法气泡"。任何交互已在事件回调里取消当前动作并重置计时。
+      const idle = idleRef.current;
+      let idleLayer = REST_LIMB_ANGLES;
+      let headTilt = 0;
+      let bodyBob = 0;
+
+      if (idle.phase === "WAITING") {
+        if (now - lastInteractionRef.current > idle.nextDelay) {
+          const type = pickIdleBehavior(Math.random);
+          idle.phase = "PLAYING";
+          idle.type = type;
+          idle.startedAt = now;
+          const def = IDLE_BEHAVIORS[type];
+          // 同步冒想法气泡(时长对齐动作，source=IDLE 避免与情绪总线重复)
+          kernelEventBus.emit("AVATAR_THOUGHT", {
+            emoji: def.thought.emoji,
+            text: def.thought.text,
+            kind: "thought",
+            source: "IDLE",
+            durationMs: def.durationMs,
+          });
+        }
+      } else {
+        const def = IDLE_BEHAVIORS[idle.type!];
+        const elapsed = now - idle.startedAt!;
+        if (elapsed >= def.durationMs) {
+          // 动作结束：回到等待，重算下次等待，并把空闲基线顺延到此刻
+          idle.phase = "WAITING";
+          idle.type = undefined;
+          idle.startedAt = undefined;
+          idle.nextDelay = nextIdleDelay(Math.random);
+          lastInteractionRef.current = now;
+        } else {
+          const r = idlePoseAt(def, elapsed, t);
+          idleLayer = r.angles;
+          headTilt = r.tilt;
+          bodyBob = r.bob;
+        }
+      }
+
+      // F1 鼠标引力: 双手随光标 IK 够指针
+      // 空闲动作播放时接管双臂，屏蔽静止光标的"残留够指"
+      let reach = REST_LIMB_ANGLES;
+      if (idle.phase !== "PLAYING") {
+        const cur = svgCursorRef.current;
+        if (cur) {
+          reach = {
+            armL: computeArmReachAngle(SHOULDER_L, cur, { side: "L" }),
+            armR: computeArmReachAngle(SHOULDER_R, cur, { side: "R" }),
+            legL: 0,
+            legR: 0,
+          };
+        }
+      }
+
+      // F2 键盘同步: 打字强度 → 胸前虚空打字 / 轻敲挠头
+      const ktNow = performance.now();
+      keyTimesRef.current = keyTimesRef.current.filter((ts) => ktNow - ts < 1000);
+      const rate = keyTimesRef.current.length; // 近 1s 按键数 ≈ 键/s
+      const intensity = typingIntensityFromRate(rate);
+      const typing =
+        intensity > 0.08
+          ? typingPose(intensity, t)
+          : intensity > 0.02
+            ? scratchHeadPose(t)
+            : REST_LIMB_ANGLES;
+
+      // F3 布娃娃弹簧: 四肢惯性晃荡, 松手后衰减归零
+      const d = dragRef.current;
+      const accel = d.accel;
+      d.springs.armL = stepSpring(d.springs.armL, accel, 0.12);
+      d.springs.armR = stepSpring(d.springs.armR, accel, 0.12);
+      d.springs.legL = stepSpring(d.springs.legL, accel * 1.2, 0.12);
+      d.springs.legR = stepSpring(d.springs.legR, accel * 1.2, 0.12);
+      const ragdoll: typeof REST_LIMB_ANGLES = {
+        armL: d.springs.armL.angle,
+        armR: d.springs.armR.angle,
+        legL: d.springs.legL.angle,
+        legR: d.springs.legR.angle,
+      };
+      d.accel *= 0.82; // 拖拽停止后衰减
+
+      // F4 系统状态: 欢呼 / 抱头 (覆盖双臂，优先级最高)
+      const status = statusRef.current;
+      const statusAngles = status !== "idle" ? systemStatusToLimbs(status, t) : undefined;
+
+      // 合成：idle(最底) → reach → typing → ragdoll → status(最高)
+      const final = composeLimbAngles({
+        idle: idleLayer,
+        reach,
+        typing,
+        ragdoll,
+        status: statusAngles,
+      });
+      // 函数式更新: 保留 eyeOffset/bodyScale，叠加 idle 头部倾斜/浮动
+      setFrame((f) => ({
+        ...f,
+        limbAngles: final,
+        headTilt,
+        bodyBob,
+      }));
+      // 头部 idle 微摆：把行为树产出的 headTilt(度) 转发给视线总线，
+      // 供 3D 皮肤映射到 head.rotation.z(roll)，与 gaze 占用的 Y/X 轴互不打架。
+      // bodyBob 这版先不接——它和 spine.position.y 呼吸在"上下浮"语义上重叠，留待真机看头部效果后再定。
+      gazeBus.headTilt = headTilt;
+    }, 120);
+
     return () => {
+      unbindRelay();
       unbindMood();
+      window.removeEventListener("avatar-skin-change", onSkinChange as EventListener);
       unbindMotion();
       unbindRender();
+      unbindStatus();
       window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.clearInterval(tick);
+      unlistenGlobal?.();
     };
   }, []);
 
+  const ActiveSkin = SKIN_REGISTRY[skinId] ?? SKIN_REGISTRY[CURRENT_SKIN_ID];
+
   return (
     <div className="avatar-root" ref={containerRef}>
+      <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
-        <Body mood={mood} motion={motion} frame={frame} eyeOpenRatio={render.eyeOpenRatio} />
+        {ActiveSkin ? (
+          <ActiveSkin
+            mood={mood}
+            motion={motion}
+            frame={frame}
+            eyeOpenRatio={render.eyeOpenRatio}
+          />
+        ) : activeAvatarId === VOID_AVATAR_PROFILE.id ? (
+          <VoidVrmSkin mood={mood} />
+        ) : (
+          <StandardAvatarSkin mood={mood} config={avatarConfig} />
+        )}
       </div>
       <button
         className="touch-point"

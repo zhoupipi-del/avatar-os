@@ -12,21 +12,40 @@
 // ============================================================
 
 import { PhysicalIntent, PhysicalIntentType, makeIntent } from "@avatar-os/primitives";
-import { UserPresence, DEFAULT_PRESENCE } from "@avatar-os/sensor";
+import { UserPresence, DEFAULT_PRESENCE, FocusState } from "@avatar-os/sensor";
 import { MorphologyEngine } from "@avatar-os/morphology";
 import { kernelEventBus } from "./event-bus";
 import { driveEngine } from "./drive-engine";
 import { behaviorVM } from "./behavior-vm";
+import { LifePhaseMachine, type LifePhaseSignals, INTERACTION_WINDOW_MS } from "./life/life-phase";
+import { AutonomousScheduler } from "./life/autonomous-scheduler";
 import { PersonalityVector, DEFAULT_PERSONALITY } from "./personality";
-
-/**
- * 在场微动作步进器契约（R2：由单一心跳驱动）。
- * 不依赖 @avatar-os/presence 以避免与 presence→runtime 形成循环依赖；
- * 任何拥有 step(nowMs, idleMs) 的对象（如 PresenceEngine）都可注入。
- */
-export interface PresenceStepper {
-  step(nowMs: number, idleMs: number): PhysicalIntentType | undefined;
-}
+import {
+  clampTraits,
+  deriveBehaviorTuning,
+  resolveProfileId,
+  BUILTIN_PERSONALITY_PROFILES,
+  DEFAULT_PERSONALITY_PROFILE_ID,
+  type PersonalityTraits,
+} from "./personality/behavior-tuning";
+import { EmotionEngine } from "./emotion/emotion-engine";
+import {
+  createInitialEmotion,
+  applyEmotionToTraits,
+  type EmotionState,
+} from "./emotion/emotion-state";
+import { deriveEmotionBaseline } from "./relationship/relationship-state";
+import {
+  RelationshipEngine,
+  isReturnEdge,
+  type RelationshipFocusState,
+  type RelationshipInteractionKind,
+} from "./relationship/relationship-engine";
+import {
+  type RelationshipRepository,
+  type PersistedRelationship,
+} from "./relationship/relationship-repository";
+import { RELATIONSHIP_SCHEMA_VERSION } from "./relationship/relationship-state";
 
 export interface LifeLoopDeps {
   /** 每 tick 采样真实在场信号（O1 修复入口） */
@@ -37,10 +56,10 @@ export interface LifeLoopDeps {
   interactionBonusProvider?: () => number;
   /** 意图落盘钩子（如 PEEK 写入交互日志） */
   interactionLogger?: (intent: PhysicalIntent) => void;
-  /** 在场微动作节律步进器（R2：由单一心跳驱动，无独立定时器） */
-  presenceEngine?: PresenceStepper;
   /** tick 间隔(ms)，缺省 1000 */
   tickMs?: number;
+  /** 关系持久化仓储（v0.3.7-A）；缺省 null → 关系层不持久化（纯内存）。 */
+  relationshipRepository?: RelationshipRepository;
 }
 
 export class LifeLoop {
@@ -50,32 +69,170 @@ export class LifeLoop {
   private readonly deps: LifeLoopDeps;
   private readonly tickMs: number;
   private unbindIntent: (() => void) | null = null;
+  private unbindInteraction: (() => void) | null = null;
+  private unbindClip: (() => void) | null = null;
+  private unbindPersonality: (() => void) | null = null;
+  /** 关系重置请求解绑（v0.3.7-A 开发态 RESET RELATIONSHIP，需二次确认）。 */
+  private unbindRelationshipReset: (() => void) | null = null;
+  /** 情绪引擎（v0.3.6-C）：维护经历后的内部状态，只为行为调制提供输入，永不发意图。 */
+  private readonly emotion = new EmotionEngine(createInitialEmotion());
+  /** 当前生效的人格 traits（驱动调度器调音的基线；情绪在此之上做偏移，中性情绪→恒等）。 */
+  private schedulerTraits: PersonalityTraits = BUILTIN_PERSONALITY_PROFILES[DEFAULT_PERSONALITY_PROFILE_ID];
+  /** 离散生命阶段机（v0.3.5-A）：统一替代零散 IDLE_BREATHE/LOOK_AT_USER 发射 */
+  private readonly phaseMachine = new LifePhaseMachine("awake");
+  /** 自主行为调度器（v0.3.6-A）：收编原 PresenceEngine 的泊松节律，成为自主动作唯一发射口。
+   *  自身零总线依赖；意图经注入的 emit 回调发到 PHYSICAL_INTENT_DISPATCH（source=DRIVE）。 */
+  private readonly scheduler = new AutonomousScheduler({
+    emit: (p) =>
+      kernelEventBus.emit(
+        "PHYSICAL_INTENT_DISPATCH",
+        makeIntent({ type: p.type, intensity: p.intensity, source: "DRIVE" }),
+      ),
+  });
+  /** 最近一次"实质交互"（说话/近场）的时间戳，用于推导 userInteracting */
+  private lastInteractionAt = 0;
+  /** 当前生效的意图类型（跟踪自 PHYSICAL_INTENT_DISPATCH），用于持续型意图去重 */
+  private lastIntentType: PhysicalIntentType | null = null;
+  /** 关系引擎（v0.3.7-A）：长期关系积累，纯逻辑、零总线依赖、永不发意图。 */
+  private relationship: RelationshipEngine;
+  /** 关系持久化仓储（v0.3.7-A）；null → 不持久化（纯内存）。 */
+  private readonly relationshipRepository: RelationshipRepository | null;
+  /** 上一次采样的焦点状态，用于推导"用户回来"边沿（v0.3.7-A）。 */
+  private previousFocusState: RelationshipFocusState | null = null;
+  /** start 幂等守卫：同一进程只加载关系 / 计一次会话。 */
+  private started = false;
+  /** 关系持久化诊断状态（loaded / neutral / saved / save-error / flushed / init）。 */
+  private persistenceStatus = "init";
 
   constructor(deps: LifeLoopDeps) {
     this.deps = deps;
     this.personality = deps.personality ?? DEFAULT_PERSONALITY;
     this.tickMs = deps.tickMs ?? 1000;
+    this.relationshipRepository = deps.relationshipRepository ?? null;
+    this.relationship = new RelationshipEngine();
   }
 
-  public start(): void {
-    if (this.timer !== null) return;
+  public async start(): Promise<void> {
+    if (this.timer !== null || this.started) return;
+    this.started = true;
+
+    // 加载关系（异步）→ 计算情绪基线 → 种子情绪引擎。
+    // 中性关系 → deriveEmotionBaseline 返回 NEUTRAL_EMOTION → 对 v0.3.6-C 零偏移（恒等）。
+    try {
+      await this.loadRelationship();
+    } catch {
+      // 加载失败不阻断启动，关系保持中性（构造函数已初始化）
+    }
 
     // 捕获内核仲裁出的 PhysicalIntent：注入形态层 + 落盘钩子
+    // 同时把"用户主动触碰"(BOUNCE_HAPPY，如点"摸摸它")记为实质互动 → active 阶段
     this.unbindIntent = kernelEventBus.on("PHYSICAL_INTENT_DISPATCH", (intent: PhysicalIntent) => {
       this.morphology.setIntent(intent);
+      this.lastIntentType = intent.type;
       this.deps.interactionLogger?.(intent);
+      if (intent.type === "BOUNCE_HAPPY") {
+        this.lastInteractionAt = Date.now();
+        // 用户主动触碰（"摸摸它"）→ 情绪正向反馈：comfort/trust↑、loneliness↓（v0.3.6-C）。
+        this.emotion.applyInteraction("touch");
+        this.syncEmotion();
+        // 仅用户真实触碰（source=SENSOR）计入关系；AI/DRIVE 不计入（v0.3.7-A）。
+        if (intent.source === "SENSOR") {
+          this.recordRelationshipInteraction("touch");
+        }
+      }
+      // 用户/外部意图立即打断自主行为，进入静默窗口（v0.3.6-A 调度规则：用户行为优先级 > 自主行为）。
+      //   AI     = LLM 回复 / DebugConsole 身体自测 / Agent 提议（说话走此源）
+      //   SENSOR = 用户点击"摸摸它"(BOUNCE_HAPPY, MouseSensor.ts)
+      // 自主意图为 DRIVE；鼠标靠近走 SENSOR_MOUSE_NEAR(不发 PHYSICAL_INTENT_DISPATCH)，均不误触发。
+      if (intent.source === "AI" || intent.source === "SENSOR") {
+        this.scheduler.notifyUserIntent(intent.type, Date.now());
+      }
     });
+
+    // 显式动画片段播放状态：播放期间不插入自主动作，播完恢复阶段默认意图（防动作抢身体）。
+    this.unbindClip = kernelEventBus.on("ANIMATION_CLIP_STATE", (p) => {
+      this.scheduler.notifyClipPlayback(p.playing);
+    });
+
+    // 人格切换请求（v0.3.6-B）：唯一对外入口，由 DebugConsole dev-only 切换器发出。
+    // 这里收口——套用调音到调度器并广播 CHANGED，保证调度器不被任何 UI 直接触碰。
+    this.unbindPersonality = kernelEventBus.on("PERSONALITY_PROFILE_REQUEST", ({ traits }) => {
+      const t = clampTraits(traits);
+      this.schedulerTraits = t;
+      const tuning = deriveBehaviorTuning(t);
+      const profileId = resolveProfileId(t);
+      kernelEventBus.emit("PERSONALITY_PROFILE_CHANGED", { profileId, traits: t, tuning });
+      // 人格基线变了，重算"人格+情绪"共同调制的有效调音（情绪状态保留，不重置）。
+      this.syncEmotion();
+    });
+
+    // 开发态 RESET RELATIONSHIP（需二次确认，由 DebugConsole 触发）：清空真实关系数据并落盘 neutral。
+    this.unbindRelationshipReset = kernelEventBus.on("RELATIONSHIP_RESET_REQUEST", () => {
+      this.relationship.reset();
+      this.emotion.seed(deriveEmotionBaseline(this.relationship.getState()));
+      this.emotion.setAttachmentModulation({ leaveLonelinessMul: 1, returnComfortMul: 1 });
+      this.persistenceStatus = "reset";
+      this.scheduleRelationshipSave("reset");
+      this.notifyRelationship();
+    });
+
+    // 初始广播默认人格：让 Runtime Snapshot / DebugConsole 立即可见（调度器默认即中性=该 Profile）。
+    {
+      const t = BUILTIN_PERSONALITY_PROFILES[DEFAULT_PERSONALITY_PROFILE_ID];
+      kernelEventBus.emit("PERSONALITY_PROFILE_CHANGED", {
+        profileId: DEFAULT_PERSONALITY_PROFILE_ID,
+        traits: t,
+        tuning: deriveBehaviorTuning(t),
+      });
+    }
+
+    // 初始广播情绪（v0.3.6-C）：初始种子情绪（=关系基线，中性时=中性）→ 对人格零偏移。
+    this.syncEmotion();
+
+    // 实质互动信号：说话 → 刷新 lastInteractionAt（驱动 active 阶段）。
+    // 注意：SENSOR_MOUSE_NEAR（光标靠近）只算"在场/好奇"，不算"互动"，
+    // 避免把"移鼠标→curious"错判成 active —— curious 由 userActive 驱动。
+    const markInteraction = () => {
+      this.lastInteractionAt = Date.now();
+      // 用户说话 → 情绪正向反馈：trust↑、comfort↑、loneliness↓（v0.3.6-C）。
+      this.emotion.applyInteraction("speak");
+      this.syncEmotion();
+      // 说话计为 conversation（不依赖 PhysicalIntent.source；同一次语音只此一事件，不会重复累计）。
+      this.recordRelationshipInteraction("speak");
+    };
+    const uInput = kernelEventBus.on("SPEECH_INPUT", markInteraction);
+    this.unbindInteraction = () => {
+      uInput();
+    };
 
     this.timer = window.setInterval(() => this.tick(), this.tickMs);
   }
 
-  public stop(): void {
+  public async stop(): Promise<void> {
     if (this.timer !== null) {
       window.clearInterval(this.timer);
       this.timer = null;
     }
     this.unbindIntent?.();
     this.unbindIntent = null;
+    this.unbindInteraction?.();
+    this.unbindInteraction = null;
+    this.unbindClip?.();
+    this.unbindClip = null;
+    this.unbindPersonality?.();
+    this.unbindPersonality = null;
+    this.unbindRelationshipReset?.();
+    this.unbindRelationshipReset = null;
+    this.started = false;
+    // 退出时尽力刷新关系持久化（等待在途写入），不丢最后一次有效互动。
+    if (this.relationshipRepository) {
+      try {
+        await this.relationshipRepository.flush();
+        this.persistenceStatus = "flushed";
+      } catch {
+        // best-effort：刷新失败不影响退出
+      }
+    }
   }
 
   private tick(): void {
@@ -84,24 +241,70 @@ export class LifeLoop {
       this.deps.presenceProvider != null ? this.deps.presenceProvider() : { ...DEFAULT_PRESENCE };
     const bonus = this.deps.interactionBonusProvider?.() ?? 0.0;
 
+    // 关系层：用户"回来"边沿（AWAY → 非 AWAY）。首次非 AWAY / 持续非 AWAY 不重复计；
+    // 再次进入 AWAY 后回来才再算。每次边沿只计一次（previousFocusState 立即更新）。
+    const curFocus = presence.focusState as RelationshipFocusState;
+    if (this.previousFocusState !== null && isReturnEdge(this.previousFocusState, curFocus)) {
+      this.recordRelationshipInteraction("return");
+    }
+    this.previousFocusState = curFocus;
+
+    // 关系层：长期未互动的极慢自然回落（>1 天无互动才降，短离不降）。
+    const rt = this.relationship.tickTime(nowMs);
+    if (rt.changed) {
+      this.scheduleRelationshipSave();
+      this.notifyRelationship();
+    }
+
     // 1. 需求→压力 演算（含 PAD 情绪）
     const { state, emotionalState } = driveEngine.tick(this.tickMs, presence, this.personality, bonus);
 
-    // 2. 兼容遗留总线：压力 tick 事件
+    // 2.5 统一生命阶段机（v0.3.5-A）：把连续 LifeState + 在场/交互信号坍缩成离散阶段，
+    //     阶段切换做去重（transition 仅在变化时返回新值），广播 LIFE_PHASE_CHANGED。
+    const hour = new Date().getHours();
+    const isNight = hour >= 23 || hour < 6;
+    const phaseSignals: LifePhaseSignals = {
+      userInteracting: nowMs - this.lastInteractionAt < INTERACTION_WINDOW_MS,
+      userActive: presence.focusState !== "AWAY",
+      idleMs: presence.idleTimeMs ?? 0,
+      energy: state.energy,
+      lonelinessPressure: state.pressures.lonelinessPressure,
+      isNight,
+    };
+    const newPhase = this.phaseMachine.transition(phaseSignals);
+    if (newPhase) kernelEventBus.emit("LIFE_PHASE_CHANGED", { phase: newPhase });
+    // 同步阶段给行为 VM：其复位默认意图（IDLE_BREATHE/LOOK_AT_USER/DOZE）由阶段决定
+    behaviorVM.setPhase(this.phaseMachine.phase);
+
+    // 3. 兼容遗留总线：压力 tick 事件
     kernelEventBus.emit("DRIVE_PRESSURE_TICK", { timestamp: nowMs });
 
-    // 3. Arbiter：评估规则 → 抢占仲裁 → 派发 PhysicalIntent
+    // 4. Arbiter：评估规则 → 抢占仲裁 → 派发 PhysicalIntent
     behaviorVM.evaluate(state);
     behaviorVM.tick(this.tickMs);
 
-    // 3.5 在场微动作节律（R2：纯步进，由本单一心跳驱动，无独立定时器）
-    const rhythm = this.deps.presenceEngine?.step(nowMs, presence.idleTimeMs ?? 0);
-    if (rhythm) {
-      kernelEventBus.emit(
-        "PHYSICAL_INTENT_DISPATCH",
-        makeIntent({ type: rhythm, intensity: 0.3, source: "DRIVE" }),
-      );
+    // 3.5 自主行为调度（v0.3.6-A）：收编原 PresenceEngine 的泊松节律，成为阶段感知的单一发射口。
+    // 持续型默认意图(呼吸/注视/打盹)与一次性自主动作(STRETCH/PEEK/LONELY_WAIT)均由它统一派发，
+    // 经冷却/全局间隔/用户打断/剪辑占用全部闸门管制——根除"意图风暴"。
+    // 仅状态有变化时返回快照，广播 AUTONOMOUS_BEHAVIOR_CHANGED 供 Runtime Snapshot / DebugConsole 观测。
+    const userPresent = presence.focusState !== "AWAY";
+    const prevBehavior = this.scheduler.getState().behavior;
+    const schedState = this.scheduler.tick(this.phaseMachine.phase, nowMs, this.lastIntentType);
+    if (schedState) kernelEventBus.emit("AUTONOMOUS_BEHAVIOR_CHANGED", { state: schedState });
+
+    // 自主动作起始边沿 → 情绪反馈（v0.3.6-C）：只调制内部状态，绝不绕过调度器。
+    // 一次 one-shot 真正发射（behavior 由 null 变为某 id）时：偷看/伸展=主动观察→curiosity 满足；
+    // 看向用户且用户在场=完成互动→trust↑。情绪变化随后经 syncEmotion 回到人格调制链路。
+    if (prevBehavior == null) {
+      const cur = this.scheduler.getState().behavior;
+      if (cur != null) {
+        this.emotion.applyAutonomous(cur === "lonely-wait" && userPresent ? "interact" : "observe");
+      }
     }
+
+    // 时间流逝推进情绪 + 把"人格+情绪"共同调制后的有效调音回写调度器并广播（v0.3.6-C）。
+    this.emotion.tick(this.tickMs, userPresent);
+    this.syncEmotion();
 
     // 4. Morphology：意图+状态 → 渲染参数
     const params = this.morphology.render(state, emotionalState);
@@ -112,4 +315,85 @@ export class LifeLoop {
       gazeBias: params.gazeBias,
     });
   }
+
+  // —— 关系层辅助方法（v0.3.7-A）——
+  // 铁律：关系引擎只维护状态，绝不发 PhysicalIntent；所有影响经情绪基线 → 调度器单发射口。
+
+  /** 加载持久化关系 → 种子情绪基线 → 计一次会话 → 广播初始状态。 */
+  private async loadRelationship(): Promise<void> {
+    let persisted: PersistedRelationship | null = null;
+    if (this.relationshipRepository) {
+      try {
+        persisted = await this.relationshipRepository.load();
+      } catch {
+        persisted = null;
+      }
+    }
+    if (persisted) {
+      this.relationship = new RelationshipEngine(persisted.state, persisted.history);
+      this.persistenceStatus = "loaded";
+    } else {
+      this.persistenceStatus = "neutral";
+    }
+    // 关系 → 情绪基线（中性关系恒等）→ 种子情绪引擎（不参与每 tick 重置）
+    this.emotion.seed(deriveEmotionBaseline(this.relationship.getState()));
+    // attachment 速率调制（中性关系 = {1,1}，零影响）
+    const att = this.relationship.getState().attachment;
+    this.emotion.setAttachmentModulation({
+      leaveLonelinessMul: 1 + att * 0.5,
+      returnComfortMul: 1 + att * 0.5,
+    });
+    // 会话启动（同进程只一次，由 start 幂等守卫保证）
+    const r = this.relationship.recordSession(Date.now());
+    if (r.changed) this.scheduleRelationshipSave("scheduled");
+    this.notifyRelationship();
+  }
+
+  /** 记录一次有效互动（touch/speak/return），变化时防抖保存并广播。 */
+  private recordRelationshipInteraction(kind: RelationshipInteractionKind): void {
+    const r = this.relationship.recordInteraction(kind, Date.now());
+    if (r.changed) {
+      this.scheduleRelationshipSave();
+      this.notifyRelationship();
+    }
+  }
+
+  /** 防抖保存关系状态（仅在有仓储时）。 */
+  private scheduleRelationshipSave(status = "scheduled"): void {
+    if (!this.relationshipRepository) return;
+    this.persistenceStatus = status;
+    this.relationshipRepository.scheduleSave({
+      state: this.relationship.getState(),
+      history: this.relationship.getHistory(),
+      schemaVersion: RELATIONSHIP_SCHEMA_VERSION,
+    });
+  }
+
+  /** 广播关系状态（含持久化诊断状态）供 Runtime Snapshot / DebugConsole 只读镜像。 */
+  private notifyRelationship(): void {
+    kernelEventBus.emit("RELATIONSHIP_STATE_CHANGED", {
+      state: this.relationship.getState(),
+      persistenceStatus: this.persistenceStatus,
+    });
+  }
+
+  /**
+   * 情绪 → 行为 同步（v0.3.6-C）：把"当前人格基线 + 当前情绪"共同派生出有效调音，回写调度器，
+   * 并广播 EMOTION_STATE_CHANGED。铁律：情绪永不发意图——它只改变调度器行为表的参数，
+   * 由 AutonomousScheduler 那条既有的唯一发射口最终决定动作。中性情绪 → 对人格零偏移（恒等）。
+   */
+  private syncEmotion(): void {
+    const e = this.emotion.getState();
+    const effective = applyEmotionToTraits(this.schedulerTraits, e);
+    this.scheduler.setPersonalityProfile(effective);
+    kernelEventBus.emit("EMOTION_STATE_CHANGED", { state: e });
+  }
+}
+
+/**
+ * 唯一对外人格切换入口（v0.3.6-B）。发 REQUEST 事件，由 LifeLoop 收口套用调音并广播 CHANGED。
+ * DebugConsole/BODY 切换器只调这一个函数——绝不触碰调度器内部，与身体切换同理（只触发、不拥有）。
+ */
+export function requestPersonalityProfile(traits: PersonalityTraits): void {
+  kernelEventBus.emit("PERSONALITY_PROFILE_REQUEST", { traits });
 }

@@ -13,6 +13,7 @@
 
 import type { PhysicalIntent } from "@avatar-os/primitives";
 import { makeIntent } from "@avatar-os/primitives";
+import { phaseDefaultIntent } from "../life/life-phase";
 
 // ------- BehaviorStatus 状态机 -------
 
@@ -127,7 +128,7 @@ export class BehaviorInstance {
   public getCurrentStepIntent(): PhysicalIntent {
     const step = this.steps[this.stepIndex];
     if (!step || step.op === "WAIT") {
-      return makeIntent({ type: "IDLE_BREATHE", intensity: 0.5, source: "SYSTEM", priority: 0 });
+      return makeIntent({ ...phaseDefaultIntent("idle"), source: "SYSTEM", priority: 0 });
     }
     const type = (step.intentType ?? "IDLE_BREATHE") as PhysicalIntent["type"];
     return makeIntent({

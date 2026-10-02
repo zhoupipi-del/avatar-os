@@ -5,3 +5,4 @@ export * from "./life-state";
 export * from "./emotion";
 export * from "./kernel-event";
 export * from "./event-validator";
+export * from "./physical-primitive";

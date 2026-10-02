@@ -8,7 +8,9 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    host: "localhost",
+    // 监听 IPv4 全网卡(含 127.0.0.1)，确保 Tauri WebView2 无论解析到 IPv4/IPv6 都能连上，
+    // 避免之前 "localhost 只解析 IPv6 而窗口用 IPv4 连接 -> ERR_CONNECTION_REFUSED" 的问题。
+    host: "0.0.0.0",
   },
   envPrefix: ["VITE_", "TAURI_"],
 });

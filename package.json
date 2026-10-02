@@ -5,7 +5,26 @@
     "dev": "pnpm --filter desktop dev",
     "build": "pnpm --recursive run build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "avatar:fast-demo-gate": "node scripts/avatar/fast-demo-gate.mjs",
+    "avatar:voice-demo-gate": "node scripts/avatar/voice-demo-gate.mjs",
+    "avatar:lip-sync-harness-gate": "node scripts/avatar/lip-sync-harness-gate.mjs",
+    "avatar:lip-sync-rhythm-gate": "node scripts/avatar/lip-sync-rhythm-gate.mjs",
+    "avatar:text-viseme-expression-gate": "node scripts/avatar/text-viseme-expression-gate.mjs",
+    "avatar:lip-sync-controls-gate": "node scripts/avatar/lip-sync-controls-gate.mjs",
+    "avatar:day11-audio-tts-probe-gate": "node scripts/avatar/day11-audio-tts-probe-gate.mjs",
+    "avatar:formant-viseme-analyzer-gate": "node scripts/avatar/formant-viseme-analyzer-gate.mjs",
+    "avatar:audio-source-adapter-probe-gate": "node scripts/avatar/audio-source-adapter-probe-gate.mjs",
+    "avatar:web-audio-runtime-bridge-gate": "node scripts/avatar/web-audio-runtime-bridge-gate.mjs",
+    "avatar:audio-fixture-tts-provider-gate": "node scripts/avatar/audio-fixture-tts-provider-gate.mjs",
+    "avatar:real-tts-provider-evaluation-gate": "node scripts/avatar/real-tts-provider-evaluation-gate.mjs",
+    "avatar:local-pcm-fixture-provider-gate": "node scripts/avatar/local-pcm-fixture-provider-gate.mjs",
+    "avatar:tts-dependency-spike-gate": "node scripts/avatar/tts-dependency-spike-gate.mjs",
+    "avatar:kokoro-provider-spike-gate": "node scripts/avatar/kokoro-provider-spike-gate.mjs",
+    "avatar:kokoro-install-compatibility-gate": "node scripts/avatar/kokoro-install-compatibility-gate.mjs",
+    "avatar:kokoro-model-smoke-gate": "node scripts/avatar/kokoro-model-smoke-gate.mjs",
+    "avatar:kokoro-output-normalizer-gate": "node scripts/avatar/kokoro-output-normalizer-gate.mjs",
+    "avatar:day15a-demo-gate": "node scripts/avatar/day15a-demo-gate.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]
