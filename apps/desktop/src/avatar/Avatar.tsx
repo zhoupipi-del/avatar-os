@@ -440,11 +440,14 @@ export function Avatar() {
           )}
         </SkinErrorBoundary>
       </div>
-      <button
-        className="touch-point"
-        onClick={(e) => mouseSensor.triggerClick(e.clientX, e.clientY)}
-        title="摸摸它"
-      />
+      {/* 旧 2D 皮肤的"摸摸它"隐形按钮；VRM 身体不需要（在 Windows 上会露出一个小方框） */}
+      {ActiveSkin ? (
+        <button
+          className="touch-point"
+          onClick={(e) => mouseSensor.triggerClick(e.clientX, e.clientY)}
+          title="摸摸它"
+        />
+      ) : null}
     </div>
   );
 }

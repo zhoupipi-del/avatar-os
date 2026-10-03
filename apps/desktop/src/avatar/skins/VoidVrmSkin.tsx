@@ -1005,6 +1005,25 @@ export function VoidVrmSkin({ mood }: SkinProps) {
   const companion = useCompanionSettings();
   const displayName = companion.companionName.trim() || "VOID";
 
+  // 输入栏（含设置按钮）平时隐藏：鼠标移到小人身上时出现，离开 2.5 秒后收起；
+  // 正在输入 / 等回复 / 开着设置时保持显示。桌面上大部分时间只看到人。
+  const [hovering, setHovering] = useState(false);
+  const [inputActive, setInputActive] = useState(false);
+  const hideTimer = useRef<number | null>(null);
+  const onStageEnter = () => {
+    if (hideTimer.current) window.clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+    setHovering(true);
+  };
+  const onStageLeave = () => {
+    if (hideTimer.current) window.clearTimeout(hideTimer.current);
+    hideTimer.current = window.setTimeout(() => setHovering(false), 2500);
+  };
+  useEffect(() => () => {
+    if (hideTimer.current) window.clearTimeout(hideTimer.current);
+  }, []);
+  const dockVisible = hovering || inputActive || thinking || settingsOpen;
+
   // 回话气泡：按文本长度自动淡出（此前会永久停留在角色身上）
   useEffect(() => {
     if (!agentSpeech) return;
@@ -1049,16 +1068,23 @@ export function VoidVrmSkin({ mood }: SkinProps) {
   }, []);
 
   return (
-    <div className="avatar-vrm-stage">
-      <DemoStatusBar
-        vrmLoaded={vrmLoaded}
-        brainReady={brainReady}
-        brainState={brainState}
-        brainTitle={brainTitle}
-        ttsAvailable={ttsAvailable}
-        lipAvailable={lipAvailable}
-        viteConnected={import.meta.env.DEV}
-      />
+    <div
+      className="avatar-vrm-stage"
+      onMouseEnter={onStageEnter}
+      onMouseMove={hovering ? undefined : onStageEnter}
+      onMouseLeave={onStageLeave}
+    >
+      {showDebug ? (
+        <DemoStatusBar
+          vrmLoaded={vrmLoaded}
+          brainReady={brainReady}
+          brainState={brainState}
+          brainTitle={brainTitle}
+          ttsAvailable={ttsAvailable}
+          lipAvailable={lipAvailable}
+          viteConnected={import.meta.env.DEV}
+        />
+      ) : null}
       <Canvas
         camera={{ position: [0, VOID_AVATAR_PROFILE.fitHeight * 0.3, 5], fov: 35 }}
         gl={{ alpha: true, antialias: true, premultipliedAlpha: false }}
@@ -1084,32 +1110,56 @@ export function VoidVrmSkin({ mood }: SkinProps) {
           />
         </Suspense>
       </Canvas>
-      {thinking ? (
-        <div className="avatar-agent-speech avatar-agent-speech--thinking" aria-live="polite">
-          <span className="avatar-thinking-dots"><i /><i /><i /></span>
+      {thinking || agentSpeech ? (
+        <div
+          key={thinking ? "thinking" : agentSpeech}
+          className={"avatar-agent-speech" + (thinking ? " avatar-agent-speech--thinking" : "")}
+          aria-live="polite"
+        >
+          <span className="avatar-agent-speech__from">{displayName}</span>
+          {thinking ? (
+            <span className="avatar-thinking-dots" aria-label="正在想"><i /><i /><i /></span>
+          ) : (
+            <span className="avatar-agent-speech__text">{agentSpeech}</span>
+          )}
         </div>
-      ) : agentSpeech ? (
-        <div className="avatar-agent-speech" aria-live="polite">{agentSpeech}</div>
       ) : null}
 
-      <AgentInputOverlay
-        placeholder={`和 ${displayName} 说句话`}
-        onSubmit={async (text) => {
-          markUserActivity();
-          await window.__avatarOSAgent?.receiveText(text);
-          markUserActivity();
-        }}
-      />
-
-      <button
-        type="button"
-        className={"avatar-settings-toggle" + (settingsOpen ? " avatar-settings-toggle--active" : "")}
-        title={settingsOpen ? "收起设置" : "设置"}
-        aria-expanded={settingsOpen}
-        onClick={() => setSettingsOpen((v) => !v)}
-      >
-        ⚙
-      </button>
+      <div className={"avatar-dock" + (dockVisible ? " is-visible" : "")} aria-hidden={!dockVisible}>
+        {/* 用户主动选了"离线固定回复"不算故障，不提示 */}
+        {brainState === "warn" && companion.brainMode !== "rule" ? (
+          <p className="avatar-dock__notice" title={brainTitle}>
+            连不上大模型，先用固定回复。打开设置点「测试连接」看原因。
+          </p>
+        ) : null}
+        <AgentInputOverlay
+          placeholder={`和 ${displayName} 说句话`}
+          onActiveChange={setInputActive}
+          leading={
+            <button
+              type="button"
+              className={"avatar-settings-toggle" + (settingsOpen ? " avatar-settings-toggle--active" : "")}
+              title={settingsOpen ? "收起设置" : "设置"}
+              aria-label="设置"
+              aria-expanded={settingsOpen}
+              tabIndex={dockVisible ? 0 : -1}
+              onClick={() => setSettingsOpen((v) => !v)}
+            >
+              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M11.1 2.2a1 1 0 0 0-2.2 0l-.2 1.4a6.6 6.6 0 0 0-1.6.7l-1.2-.8a1 1 0 0 0-1.5 1.5l.8 1.2c-.3.5-.5 1-.7 1.6l-1.4.2a1 1 0 0 0 0 2.2l1.4.2c.2.6.4 1.1.7 1.6l-.8 1.2a1 1 0 0 0 1.5 1.5l1.2-.8c.5.3 1 .5 1.6.7l.2 1.4a1 1 0 0 0 2.2 0l.2-1.4c.6-.2 1.1-.4 1.6-.7l1.2.8a1 1 0 0 0 1.5-1.5l-.8-1.2c.3-.5.5-1 .7-1.6l1.4-.2a1 1 0 0 0 0-2.2l-1.4-.2a6.6 6.6 0 0 0-.7-1.6l.8-1.2a1 1 0 0 0-1.5-1.5l-1.2.8a6.6 6.6 0 0 0-1.6-.7zM10 12.6a2.6 2.6 0 1 1 0-5.2 2.6 2.6 0 0 1 0 5.2z"
+                />
+              </svg>
+            </button>
+          }
+          onSubmit={async (text) => {
+            markUserActivity();
+            await window.__avatarOSAgent?.receiveText(text);
+            markUserActivity();
+          }}
+        />
+      </div>
 
       {settingsOpen ? (
         <div className="avatar-settings-drawer" role="dialog" aria-label="设置">
