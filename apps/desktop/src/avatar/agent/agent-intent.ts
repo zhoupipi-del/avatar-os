@@ -49,6 +49,8 @@ export interface AgentBodyBridge {
   speakText(text: string): void;
   playIntent(intent: AgentIntent): void;
   setEmotion(emotion: AgentEmotion): void;
+  /** 进入 / 退出"思考中"（等待大脑回复期间），可选 */
+  setThinking?(thinking: boolean): void;
   stop?(): void;
 }
 

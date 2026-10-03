@@ -2,6 +2,7 @@ import type { AgentBrain } from "./agent-intent";
 import { JsonLlmBrain } from "./json-llm-brain";
 import { OllamaProvider } from "./ollama-provider";
 import { RuleBasedBrain } from "./rule-based-brain";
+import type { ConversationMemory } from "./conversation-memory";
 
 export interface DemoBrainEnvironment {
   readonly VITE_AVATAROS_BRAIN_MODE?: string;
@@ -22,6 +23,8 @@ export interface DemoBrainConfig {
 export interface CreateDefaultDemoBrainOptions {
   readonly env?: DemoBrainEnvironment;
   readonly fetchImpl?: typeof fetch;
+  /** 多轮对话记忆（仅 ollama 模式生效） */
+  readonly memory?: ConversationMemory;
 }
 
 export function createDefaultDemoBrain(
@@ -40,7 +43,7 @@ export function createDefaultDemoBrain(
       timeoutMs: config.ollama.timeoutMs,
       fetchImpl: options.fetchImpl,
     }),
-    { fallback: new RuleBasedBrain() },
+    { fallback: new RuleBasedBrain(), memory: options.memory },
   );
 }
 

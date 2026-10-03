@@ -30,6 +30,10 @@ export async function loadVrm(url: string): Promise<VRM> {
     throw new Error(`[VOID] File does not contain a VRM payload: ${url}`);
   }
 
+  // VRM 0.x 模型默认面朝 -Z（背对相机），统一转到与 VRM 1.0 相同朝向；对 1.0 模型无影响。
+  // 让 VRoid Studio 无论导出 0.x 还是 1.0，替换 avatar.vrm 后都是正面。
+  VRMUtils.rotateVRM0(vrm);
+
   // 命名 + 渲染优化
   vrm.scene.name = "VOID";
   vrm.scene.frustumCulled = false;

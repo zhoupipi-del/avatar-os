@@ -18,8 +18,10 @@ import { createCognitionDriver } from "./cognition/cognitionDriver";
 import { DebugConsole } from "./debug/DebugConsole";
 import { DemoModeToggle } from "./demo/DemoModeToggle";
 import { AnimationInspector } from "./avatar/skins/AnimationInspector";
-import { avatarService, attachAvatarPersistence, IN_MEMORY_AVATAR_STORAGE } from "./avatar/avatar-profiles";
+import { avatarService, attachAvatarPersistence, createLocalAvatarStorage } from "./avatar/avatar-profiles";
 import { createTauriRelationshipRepository, attachRelationshipCloseHandler } from "./persistence/tauri-relationship-repository";
+import { companionSettings, isQuietHour } from "./companion/companion-settings";
+import { getLastUserActivityAt, isUserPresent } from "./companion/activity";
 
 const DRIVE_TICK_MS = 1000;
 
@@ -100,13 +102,27 @@ export default function App() {
             loneliness: state.pressures.lonelinessPressure,
           };
         },
-        proactive: { enabled: true, lonelinessThreshold: 0.7, intervalMs: 30_000, idleMs: 60_000 },
+        // 陪伴模式：间隔 / 开关 / 安静时段都读 ⚙ 设置，实时生效；VOID 输入框聊天也算互动
+        // 触发不再依赖孤独值（孤独值只在人不在时上涨 → 会对着空屋子说话），
+        // 改为：人在电脑前 + 5 分钟没聊天 + 距上次主动开口超过设置的间隔。
+        proactive: {
+          enabled: true,
+          lonelinessThreshold: 0,
+          intervalMs: 30_000,
+          idleMs: 5 * 60_000,
+          cooldownMs: () => companionSettings.get().proactiveIntervalMin * 60_000,
+          isAllowed: () => {
+            const s = companionSettings.get();
+            return s.proactiveEnabled && s.brainMode !== "rule" && !isQuietHour(s) && isUserPresent();
+          },
+          getLastUserActivityAt,
+        },
       });
       runtimeKernel.start();
 
-      // 身体所有权装配：从存储恢复 active avatar（Phase C 接真实存储），
+      // 身体所有权装配：从 localStorage 恢复 active avatar（Phase C），
       // 并订阅变更回写。AvatarService 持有事实，App 仅做 Composition Root 接线，不拥有状态。
-      unbindAvatarPersistence = attachAvatarPersistence(avatarService, IN_MEMORY_AVATAR_STORAGE);
+      unbindAvatarPersistence = attachAvatarPersistence(avatarService, createLocalAvatarStorage());
     };
     void bootstrap();
 

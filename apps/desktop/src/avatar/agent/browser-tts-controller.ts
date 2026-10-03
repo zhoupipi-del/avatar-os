@@ -114,6 +114,11 @@ export class BrowserTtsController {
     }
   }
 
+  /** 当前朗读参数（云端克隆声音复用同一组音量 / 语速，⚙ 里的滑杆对两种声音都生效） */
+  getVoiceParams(): { readonly rate: number; readonly pitch: number; readonly volume: number } {
+    return { rate: this.rate, pitch: this.pitch, volume: this.volume };
+  }
+
   getStatus(): BrowserTtsStatus {
     return {
       available: this.isAvailable(),

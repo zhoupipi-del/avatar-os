@@ -8,7 +8,7 @@
 //   - avatarService        → 持有"当前激活的是谁"这一事实（runtime，可订阅）
 //   - AVATAR_PROFILES    → 持有 id → RigConfig 映射（desktop，资产知识）
 //   - resolveAvatarProfile → 解析 + 非法 id 回退默认（void-vrm）
-//   - attachAvatarPersistence → Composition Root 装配缝（Phase C 接真实存储）
+//   - attachAvatarPersistence → Composition Root 装配缝（Phase C：createLocalAvatarStorage）
 //
 // UI / React 只：订阅 avatarService 拿 activeId → resolveAvatarProfile 拿 config → 渲染。
 // UI 永不直接 load GLB、永不直接写 activeId（只能 activate()）。
@@ -109,6 +109,39 @@ export const IN_MEMORY_AVATAR_STORAGE: AvatarStorageAdapter = {
 };
 
 /**
+ * Phase C：localStorage 持久化（Tauri WebView 与浏览器均可用）。
+ * 只存 activeId 字符串；读到未知 id 由 resolveAvatarProfile / LEGACY_BODY_MIGRATION 兜底。
+ * localStorage 不可用（隐私模式 / node）时退回内存占位。
+ */
+export function createLocalAvatarStorage(key = "avataros:active-avatar:v1"): AvatarStorageAdapter {
+  let ls: Storage | undefined;
+  try {
+    ls = typeof window !== "undefined" ? window.localStorage : undefined;
+  } catch {
+    ls = undefined;
+  }
+  if (!ls) return IN_MEMORY_AVATAR_STORAGE;
+  const store = ls;
+  return {
+    load: () => {
+      try {
+        const v = store.getItem(key);
+        return v && v.trim() ? v : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    save: (id) => {
+      try {
+        store.setItem(key, id);
+      } catch {
+        // 配额满 / 禁用：静默降级，不影响运行
+      }
+    },
+  };
+}
+
+/**
  * Composition Root 装配：从存储恢复 activeId + 订阅变更回写。
  * 由 App.tsx 在自举期调用一次。返回取消订阅函数（App 卸载时清理）。
  */
@@ -119,6 +152,7 @@ export function attachAvatarPersistence(
   const loaded = adapter.load();
   // V2-0：旧 body id 自动迁移到 void-vrm（旧资产/Skin 保留不删）
   const migrated = loaded ? (LEGACY_BODY_MIGRATION[loaded] ?? loaded) : loaded;
-  service.restore(migrated);
+  // 未知 id（资产已删 / 存储被篡改）不恢复，保持默认身体
+  service.restore(migrated && AVATAR_PROFILES[migrated] ? migrated : undefined);
   return service.subscribe((s) => adapter.save(s.activeId));
 }

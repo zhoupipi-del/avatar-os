@@ -17,6 +17,7 @@ import {
   writeTextFile,
 } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isTauri } from "../platform/is-tauri";
 import {
   RelationshipPersistence,
   type FileAccess,
@@ -44,8 +45,12 @@ class TauriFileAccess implements FileAccess {
   }
 }
 
-/** 创建关系仓储（防抖默认 8s）。 */
-export function createTauriRelationshipRepository(debounceMs = 8000): RelationshipRepository {
+/**
+ * 创建关系仓储（防抖默认 8s）。
+ * 非 Tauri 环境返回 undefined → LifeLoop 降级为纯内存（不持久化），而不是每次写盘都抛 invoke 错误。
+ */
+export function createTauriRelationshipRepository(debounceMs = 8000): RelationshipRepository | undefined {
+  if (!isTauri()) return undefined;
   return new RelationshipPersistence(new TauriFileAccess(), RELATIONSHIP_FILE, TEMP_FILE, debounceMs);
 }
 
@@ -53,16 +58,19 @@ export function createTauriRelationshipRepository(debounceMs = 8000): Relationsh
  * 绑定窗口关闭请求：先尽力 flush 关系持久化，再 destroy 强制关闭。
  * 仅依赖 onCloseRequested（防 beforeunload 不可靠）。beforeunload 仍作 best-effort 兜底。
  */
-export function attachRelationshipCloseHandler(repository: RelationshipRepository): void {
+export function attachRelationshipCloseHandler(repository: RelationshipRepository | undefined): void {
+  if (!repository || !isTauri()) return;
   const appWindow = getCurrentWindow();
-  void appWindow.onCloseRequested(async (event) => {
-    event.preventDefault();
-    try {
-      await repository.flush();
-    } finally {
-      await appWindow.destroy();
-    }
-  });
+  appWindow
+    .onCloseRequested(async (event) => {
+      event.preventDefault();
+      try {
+        await repository.flush();
+      } finally {
+        await appWindow.destroy();
+      }
+    })
+    .catch((e) => console.warn("[relationship] close handler not attached:", e));
 }
 
 export type { PersistedRelationship };

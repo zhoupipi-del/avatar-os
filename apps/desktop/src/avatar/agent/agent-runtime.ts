@@ -29,6 +29,7 @@ export class AgentRuntime {
     this.isThinking = true;
     this.lastUserText = text;
     this.error = null;
+    this.body.setThinking?.(true);
 
     try {
       const output = await this.brain.think({
@@ -41,6 +42,7 @@ export class AgentRuntime {
       }
 
       this.lastOutput = output;
+      this.body.setThinking?.(false);
 
       this.body.speakText(output.speech);
       this.body.setEmotion(output.emotion);
@@ -68,6 +70,7 @@ export class AgentRuntime {
       };
 
       this.lastOutput = fallback;
+      this.body.setThinking?.(false);
 
       this.body.speakText(fallback.speech);
       this.body.setEmotion(fallback.emotion);
@@ -84,6 +87,7 @@ export class AgentRuntime {
   interrupt(): void {
     this.sequence += 1;
     this.isThinking = false;
+    this.body.setThinking?.(false);
     this.body.stop?.();
   }
 

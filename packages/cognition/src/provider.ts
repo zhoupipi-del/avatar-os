@@ -87,6 +87,8 @@ export class OllamaProvider implements LLMProvider {
   constructor(
     private readonly model = "deepseek-r1:8b",
     private readonly baseUrl = "http://localhost:11434",
+    /** 可注入 fetch（desktop 在 Tauri 内注入 plugin-http，绕过 WebView CORS） */
+    private readonly fetchImpl: typeof fetch = (...args) => fetch(...args),
   ) {}
 
   async generate(userPrompt: string, systemPrompt: string): Promise<LLMResult> {
@@ -94,7 +96,7 @@ export class OllamaProvider implements LLMProvider {
 
     let data: unknown;
     try {
-      const res = await fetch(`${this.baseUrl}/api/generate`, {
+      const res = await this.fetchImpl(`${this.baseUrl}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: this.model, prompt, stream: false }),

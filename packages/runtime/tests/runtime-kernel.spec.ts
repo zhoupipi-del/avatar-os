@@ -120,4 +120,55 @@ describe("RuntimeKernel — 闭环入口编排", () => {
     expect(drv.calls.length).toBe(0);
     kernel.stop();
   });
+
+  it("proactive cooldown：开口一次后，冷却期内不再开口", () => {
+    const mem = makeMemoryStub();
+    const drv = makeDriverStub();
+    const kernel = new RuntimeKernel({
+      cognition: drv.driver,
+      memory: mem.memory,
+      getLifeState: () => ({ mood: "LONELY", energy: 0.5, loneliness: 0.9 }),
+      proactive: { enabled: true, intervalMs: 100, idleMs: 1, cooldownMs: () => 1000 },
+    });
+    kernel.start();
+    vi.advanceTimersByTime(950);
+    expect(drv.calls.length).toBe(1);
+    vi.advanceTimersByTime(200);
+    expect(drv.calls.length).toBe(2);
+    kernel.stop();
+  });
+
+  it("proactive：外部聊天活动视为互动；isAllowed=false 时不开口", () => {
+    const mem = makeMemoryStub();
+    const drv = makeDriverStub();
+    let allowed = true;
+    let lastChat = 0;
+    const kernel = new RuntimeKernel({
+      cognition: drv.driver,
+      memory: mem.memory,
+      getLifeState: () => ({ mood: "LONELY", energy: 0.5, loneliness: 0.9 }),
+      proactive: {
+        enabled: true,
+        intervalMs: 100,
+        idleMs: 500,
+        getLastUserActivityAt: () => lastChat,
+        isAllowed: () => allowed,
+      },
+    });
+    kernel.start();
+    // 一直在聊天：不开口
+    for (let i = 0; i < 10; i++) {
+      lastChat = Date.now();
+      vi.advanceTimersByTime(100);
+    }
+    expect(drv.calls.length).toBe(0);
+    // 安静时段：不开口
+    allowed = false;
+    vi.advanceTimersByTime(1000);
+    expect(drv.calls.length).toBe(0);
+    allowed = true;
+    vi.advanceTimersByTime(200);
+    expect(drv.calls.length).toBeGreaterThanOrEqual(1);
+    kernel.stop();
+  });
 });

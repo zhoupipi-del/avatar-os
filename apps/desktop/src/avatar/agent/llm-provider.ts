@@ -5,7 +5,7 @@
  * 本阶段唯一实现是 OllamaProvider（不接 OpenAI）。
  */
 export interface LlmMessage {
-  readonly role: "system" | "user" | "assitant";
+  readonly role: "system" | "user" | "assistant";
   readonly content: string;
 }
 
@@ -17,8 +17,13 @@ export interface LlmProvider {
    * 发送一次补全请求，返回模型原始文本。
    * 文本可能夹带 JSON 之外的说明文字 —— 由 JsonLlmBrain 负责解析。
    * 不可用时必须 reject（JsonLlmBrain 会据此回退 RuleBasedBrain）。
+   * history：此前的多轮对话（按时间顺序，不含本句），放在 system 与本句 user 之间。
    */
-  complete(systemPrompt: string, userText: string): Promise<string>;
+  complete(
+    systemPrompt: string,
+    userText: string,
+    history?: readonly LlmMessage[],
+  ): Promise<string>;
 
   /** 健康检查：供应商是否可达（可选，供上层策略使用） */
   isAvailable(): Promise<boolean>;

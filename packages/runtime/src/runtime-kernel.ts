@@ -61,6 +61,12 @@ export interface RuntimeKernelDeps {
     lonelinessThreshold?: number;
     intervalMs?: number;
     idleMs?: number;
+    /** 两次主动开口的最小间隔（可为函数，随设置实时变化）；缺省 0 = 不限制（旧行为） */
+    cooldownMs?: number | (() => number);
+    /** 额外闸门（如：设置里关掉了、处于安静时段），返回 false 则本轮不开口 */
+    isAllowed?: () => boolean;
+    /** 外部互动时间源（如 VOID 输入框聊天），与 SPEECH_INPUT 取较晚者 */
+    getLastUserActivityAt?: () => number;
   };
 }
 
@@ -68,6 +74,7 @@ export class RuntimeKernel {
   private unsubs: Array<() => void> = [];
   private proactiveTimer: ReturnType<typeof setInterval> | null = null;
   private lastUserInputAt = 0;
+  private lastProactiveAt = 0;
 
   constructor(private readonly deps: RuntimeKernelDeps) {}
 
@@ -109,13 +116,21 @@ export class RuntimeKernel {
       const threshold = proactive.lonelinessThreshold ?? 0.7;
       const intervalMs = proactive.intervalMs ?? 30_000;
       const idleMs = proactive.idleMs ?? 60_000;
+      // 启动时刻作为互动基线：刚开机不立刻开口，至少等 idleMs
+      this.lastUserInputAt = Math.max(this.lastUserInputAt, Date.now());
       this.proactiveTimer = setInterval(() => {
+        const now = Date.now();
         const life = this.deps.getLifeState();
-        const idleFor = Date.now() - this.lastUserInputAt;
-        if (life.loneliness >= threshold && idleFor >= idleMs) {
-          if (this.deps.cognition) {
-            void this.deps.cognition.stimulate({ text: "" });
-          }
+        const lastActivity = Math.max(this.lastUserInputAt, proactive.getLastUserActivityAt?.() ?? 0);
+        const idleFor = now - lastActivity;
+        const cooldown =
+          typeof proactive.cooldownMs === "function" ? proactive.cooldownMs() : (proactive.cooldownMs ?? 0);
+        if (life.loneliness < threshold || idleFor < idleMs) return;
+        if (this.lastProactiveAt > 0 && now - this.lastProactiveAt < cooldown) return;
+        if (proactive.isAllowed && !proactive.isAllowed()) return;
+        if (this.deps.cognition) {
+          this.lastProactiveAt = now;
+          void this.deps.cognition.stimulate({ text: "" });
         }
       }, intervalMs);
     }

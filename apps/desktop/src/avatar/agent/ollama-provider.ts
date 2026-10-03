@@ -1,4 +1,4 @@
-import type { LlmProvider } from "./llm-provider";
+import type { LlmMessage, LlmProvider } from "./llm-provider";
 
 export interface OllamaProviderOptions {
   readonly baseUrl?: string;
@@ -30,7 +30,9 @@ export class OllamaProvider implements LlmProvider {
     );
     this.model = options.model?.trim() || "qwen2.5:7b";
     this.timeoutMs = normalizeTimeoutMs(options.timeoutMs);
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // 必须包一层再存：把原生 fetch 存成实例字段后以 this.fetchImpl(...) 调用，
+    // 浏览器 / WebView2 会抛 "Illegal invocation"（this 不是 Window），导致永远回退规则脑。
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   async isAvailable(): Promise<boolean> {
@@ -51,7 +53,11 @@ export class OllamaProvider implements LlmProvider {
 
   // 与 LlmProvider 接口 + JsonLlmBrain 调用保持一致：接收 systemPrompt 与 userText 两参，
   // 分别放入 system / user 角色，确保 JSON 格式指令与用户真实问题都送达。
-  async complete(systemPrompt: string, userText: string): Promise<string> {
+  async complete(
+    systemPrompt: string,
+    userText: string,
+    history: readonly LlmMessage[] = [],
+  ): Promise<string> {
     const response = await this.fetchWithTimeout(
       `${this.baseUrl}/api/chat`,
       {
@@ -67,6 +73,9 @@ export class OllamaProvider implements LlmProvider {
               role: "system",
               content: systemPrompt,
             },
+            ...history
+              .filter((m) => m.role !== "system" && m.content.trim().length > 0)
+              .map((m) => ({ role: m.role, content: m.content })),
             {
               role: "user",
               content: userText,
@@ -95,6 +104,10 @@ export class OllamaProvider implements LlmProvider {
     }
 
     return content;
+  }
+
+  getModel(): string {
+    return this.model;
   }
 
   getDebugConfig(): {

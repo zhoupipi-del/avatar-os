@@ -8,10 +8,10 @@
  * 在 Tauri webview 内才真正 invoke Rust 命令。
  */
 import { invoke } from "@tauri-apps/api/core";
+import { isTauri } from "../platform/is-tauri";
 
 export async function setClickThrough(ignore: boolean): Promise<void> {
-  const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
-  if (!w.__TAURI_INTERNALS__) return; // 非 Tauri 环境（Web/Dev），跳过
+  if (!isTauri()) return; // 非 Tauri 环境（Web/Dev），跳过
   try {
     await invoke("set_ignore_cursor_events", { ignore });
   } catch (e) {

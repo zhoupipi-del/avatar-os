@@ -40,6 +40,16 @@ export interface SandboxLike {
   dispatchExternalIntent(intent: PhysicalIntentType, intensity?: number): boolean;
 }
 
+export interface CognitionEngineOptions {
+  /**
+   * 人设开头（替换默认「二狗子」桌宠设定）。每次思考时现算，可带当前时间。
+   * JSON 格式要求与状态行仍由引擎追加，保证结构化输出契约不变。
+   */
+  persona?: () => string;
+}
+
+const DEFAULT_PERSONA = "你是桌面上一个名叫「二狗子」的萌系桌面宠物，性格接地气、话不多但到位。";
+
 export class CognitionEngine {
   private isThinking = false;
   private lastTriggerAt = 0;
@@ -48,6 +58,7 @@ export class CognitionEngine {
   constructor(
     private readonly sandbox: SandboxLike = AgentSandbox,
     private readonly provider: LLMProvider,
+    private readonly options: CognitionEngineOptions = {},
   ) {}
 
   public async think(ctx: LifeContext): Promise<void> {
@@ -132,7 +143,7 @@ export class CognitionEngine {
       .map((m) => `- ${m}`)
       .join("\n");
     return [
-      "你是桌面上一个名叫「二狗子」的萌系桌面宠物，性格接地气、话不多但到位。",
+      this.options.persona?.() || DEFAULT_PERSONA,
       "请用简体中文回复，不超过 80 字。",
       "只输出一个 JSON 对象，不要任何解释或额外文字，格式如下：",
       '{"intent":"GREET","speech":"你说的话","mood":"CALM"}',

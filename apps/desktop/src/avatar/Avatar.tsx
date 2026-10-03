@@ -26,10 +26,13 @@ import {
   type SystemStatus,
 } from "@avatar-os/morphology";
 import { ThoughtBubble } from "./components/ThoughtBubble";
-import { SKIN_REGISTRY, CURRENT_SKIN_ID, setSkin, StandardAvatarSkin, VoidVrmSkin } from "./skins/SkinRegistry";
+import { SKIN_REGISTRY, setSkin, StandardAvatarSkin, VoidVrmSkin } from "./skins/SkinRegistry";
+import { SkinErrorBoundary } from "./skins/SkinErrorBoundary";
 import { gazeBus } from "./skins/gazeBus";
-import { avatarService, resolveAvatarProfile } from "./avatar-profiles";
+import { avatarService, resolveAvatarProfile, DEFAULT_AVATAR_ID } from "./avatar-profiles";
 import { VOID_AVATAR_PROFILE } from "./void-avatar-profile";
+import { isTauri } from "../platform/is-tauri";
+import { markPresence } from "../companion/activity";
 import "./Avatar.css";
 
 interface RenderParams {
@@ -77,8 +80,10 @@ export function Avatar() {
   // 当前激活身体：经 avatarService(事实源) → avatar-profiles 目录解析。
   // 不直接写死 BAG_CONFIG，所有权上提到 runtime。
   const { id: activeAvatarId, config: avatarConfig } = useActiveAvatarConfig();
-  // 当前激活皮肤（控制台可热切换，注册表驱动）
-  const [skinId, setSkinId] = useState<string>(CURRENT_SKIN_ID);
+  // 遗留实验皮肤（classic-2d / mecha-core / frieza-3d）：仅在控制台显式 setSkin() 时启用。
+  // 默认 null → 走 AvatarService 产品身体（void-vrm）。此前默认 frieza-3d 会加载不入库的
+  // /models/frieza.glb，导致整个 React 树崩溃白屏。
+  const [skinId, setSkinId] = useState<string | null>(null);
   // 最新渲染参数引用：供 mousemove 闭包读取，避免重注册监听
   const renderRef = useRef<RenderParams>(DEFAULT_RENDER);
 
@@ -176,6 +181,7 @@ export function Avatar() {
     let lastTime = 0;
     const applyPointerViewport = (vx: number, vy: number) => {
       const now = Date.now();
+      markPresence(now);
       if (now - lastTime < 50) return;
       lastTime = now;
       const el = containerRef.current;
@@ -227,15 +233,23 @@ export function Avatar() {
     // 全局鼠标引力：Rust 端 WH_MOUSE_LL 钩子推送全屏光标坐标，
     // 让宠物能响应屏幕任意位置的鼠标移动（窗口内 mousemove 只覆盖小窗本身）
     let unlistenGlobal: (() => void) | undefined;
-    listen<{ x: number; y: number }>("global-mousemove", (event) => {
-      const p = event.payload;
-      applyPointerViewport(p.x - window.screenX, p.y - window.screenY);
-    }).then((fn) => {
-      unlistenGlobal = fn;
-    });
+    let disposed = false;
+    // 非 Tauri 环境（纯浏览器 vite dev）没有 IPC，listen 会抛 transformCallback 错误 → 跳过
+    if (isTauri()) {
+      listen<{ x: number; y: number }>("global-mousemove", (event) => {
+        const p = event.payload;
+        applyPointerViewport(p.x - window.screenX, p.y - window.screenY);
+      })
+        .then((fn) => {
+          if (disposed) fn();
+          else unlistenGlobal = fn;
+        })
+        .catch((e) => console.warn("[Avatar] global-mousemove listen failed:", e));
+    }
 
     // F2: 键盘打字强度采集
     const onKeyDown = () => {
+      markPresence();
       keyTimesRef.current.push(performance.now());
       lastInteractionRef.current = Date.now();
       cancelIdle();
@@ -393,28 +407,38 @@ export function Avatar() {
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mouseup", onMouseUp);
       window.clearInterval(tick);
+      disposed = true;
       unlistenGlobal?.();
     };
   }, []);
 
-  const ActiveSkin = SKIN_REGISTRY[skinId] ?? SKIN_REGISTRY[CURRENT_SKIN_ID];
+  const ActiveSkin = skinId ? SKIN_REGISTRY[skinId] : undefined;
 
   return (
     <div className="avatar-root" ref={containerRef}>
       <ThoughtBubble />
       <div className="drag-region-wrap" data-tauri-drag-region>
-        {ActiveSkin ? (
-          <ActiveSkin
-            mood={mood}
-            motion={motion}
-            frame={frame}
-            eyeOpenRatio={render.eyeOpenRatio}
-          />
-        ) : activeAvatarId === VOID_AVATAR_PROFILE.id ? (
-          <VoidVrmSkin mood={mood} />
-        ) : (
-          <StandardAvatarSkin mood={mood} config={avatarConfig} />
-        )}
+        <SkinErrorBoundary
+          resetKey={`${skinId ?? ""}|${activeAvatarId}`}
+          onError={() => {
+            // 身体资源缺失 / 加载失败：退回产品默认身体，而不是整窗白屏
+            if (skinId) setSkinId(null);
+            else if (activeAvatarId !== DEFAULT_AVATAR_ID) avatarService.activate(DEFAULT_AVATAR_ID);
+          }}
+        >
+          {ActiveSkin ? (
+            <ActiveSkin
+              mood={mood}
+              motion={motion}
+              frame={frame}
+              eyeOpenRatio={render.eyeOpenRatio}
+            />
+          ) : activeAvatarId === VOID_AVATAR_PROFILE.id || !avatarConfig ? (
+            <VoidVrmSkin mood={mood} />
+          ) : (
+            <StandardAvatarSkin mood={mood} config={avatarConfig} />
+          )}
+        </SkinErrorBoundary>
       </div>
       <button
         className="touch-point"

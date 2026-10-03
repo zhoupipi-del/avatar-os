@@ -26,7 +26,7 @@ import {
   type AvatarLifeState,
   type ChannelProperty,
 } from "@avatar-os/runtime";
-import { NEUTRAL_EMOTIONAL_STATE } from "@avatar-os/primitives";
+import { NEUTRAL_EMOTIONAL_STATE, Mood } from "@avatar-os/primitives";
 import { gazeBus } from "./gazeBus";
 import { loadVrm, disposeVrm } from "../vrm/load-vrm";
 import { loadVrmActions } from "../vrm/load-vrma";
@@ -46,6 +46,14 @@ import { VOID_AVATAR_PROFILE } from "../void-avatar-profile";
 import type { SkinProps } from "./types";
 import { useAdvancedDebug } from "../../demo/demo-runtime";
 import { DemoStatusBar } from "../../demo/DemoStatusBar";
+import { localFetch } from "../../platform/local-fetch";
+import { companionSettings } from "../../companion/companion-settings";
+import { CompanionBrain } from "../../companion/companion-brain";
+import { conversationStore } from "../../companion/conversation-store";
+import { markUserActivity } from "../../companion/activity";
+import { useCompanionSettings } from "../../companion/useCompanionSettings";
+import { CompanionSettingsPanel } from "../../companion/CompanionSettingsPanel";
+import { CompanionVoice } from "../../companion/cloud-voice";
 import {
   AgentInputOverlay,
   AgentRuntime,
@@ -55,8 +63,11 @@ import {
   TextVisemeExpressionDriver,
   LipSyncControlOverlay,
   VoiceControlOverlay,
-  createDefaultDemoBrain,
+  ConversationMemory,
+  isStatusReportingBrain,
   probeLipShapes,
+  type AgentBrain,
+  type BrainStatus,
   type AgentBodyBridge,
   type AgentEmotion,
   type AgentIntent,
@@ -72,6 +83,8 @@ declare global {
       receiveText(text: string): Promise<unknown>;
       interrupt(): void;
       snapshot(): unknown;
+      clearMemory(): void;
+      reprobe(): Promise<BrainStatus | null>;
     };
   }
 }
@@ -91,6 +104,73 @@ interface VrmEngine {
   lipSyncNoop?: LipSyncNoopHarness;
   lipSyncRhythm?: LipSyncTextRhythmDriver;
   textVisemeExpression?: TextVisemeExpressionDriver;
+  brain?: AgentBrain;
+  memory?: ConversationMemory;
+  /** 智能体占用身体的截止时刻（思考中=Infinity）；在此之前生命状态 mood 不覆盖表情 */
+  busyUntil: number;
+  unbindProactive?: () => void;
+  unbindSettings?: () => void;
+  /** 朗读门面：克隆声音（云端）/ 系统语音，负责在出声时启动嘴型 */
+  voice?: CompanionVoice;
+}
+
+/**
+ * 说一句话：朗读 + 嘴型。嘴型在声音真正开始时才启动（云端合成有网络延迟），
+ * 云端音频播完即收嘴；系统语音沿用原有文本节奏。
+ */
+function speakWithBody(eng: VrmEngine, text: string): void {
+  const startLip = () => {
+    eng.busyUntil = Date.now() + estimateSpeechHoldMs(text);
+    eng.lipSyncNoop?.notifySpeechText(text);
+    eng.lipSyncRhythm?.startText(text);
+    eng.textVisemeExpression?.startText(text);
+  };
+  if (eng.voice) {
+    void eng.voice.speak(text, {
+      onStart: startLip,
+      onEnd: () => {
+        eng.lipSyncRhythm?.cancel();
+        eng.textVisemeExpression?.cancel(eng.vrm?.expressionManager);
+      },
+    });
+  } else {
+    eng.tts?.speak(text);
+    startLip();
+  }
+}
+
+/** 说完一句话后保留表情 / 气泡的时长估算（中文约 4.5 字/秒 + 余量） */
+export function estimateSpeechHoldMs(text: string): number {
+  return Math.min(15000, 2500 + text.length * 220);
+}
+
+/**
+ * 生命状态（LifeLoop / AvatarFSM 的 Mood）→ VOID 具名表情预设。
+ * 只在智能体空闲时生效：说话 / 思考期间由 AgentRuntime 的 emotion 主导。
+ */
+export function applyMoodExpression(expression: VrmExpressionController, mood: Mood): void {
+  switch (mood) {
+    case Mood.HAPPY:
+    case Mood.EXCITED:
+    case Mood.PLAYFUL:
+      expression.happy();
+      return;
+    case Mood.SAD:
+    case Mood.LONELY:
+      expression.sad();
+      return;
+    case Mood.TIRED:
+    case Mood.SLEEPING:
+      expression.drowsy();
+      return;
+    case Mood.CURIOUS:
+      expression.thinking();
+      return;
+    case Mood.CALM:
+    case Mood.FOCUSED:
+    default:
+      expression.idle();
+  }
 }
 
 function sanitizeFrameDelta(rawDelta: number): number {
@@ -159,6 +239,7 @@ function getVoidActionNames(
 function createVoidAgentBodyBridge(
   eng: VrmEngine,
   setAgentSpeech: (text: string) => void,
+  setThinkingUi: (thinking: boolean) => void,
   tts?: BrowserTtsController,
   lipSyncNoop?: LipSyncNoopHarness,
   lipSyncRhythm?: LipSyncTextRhythmDriver,
@@ -166,11 +247,19 @@ function createVoidAgentBodyBridge(
 ): AgentBodyBridge {
   return {
     speakText(text: string): void {
+      eng.busyUntil = Date.now() + estimateSpeechHoldMs(text);
       setAgentSpeech(text);
-      tts?.speak(text);
-      lipSyncNoop?.notifySpeechText(text);
-      lipSyncRhythm?.startText(text);
-      textVisemeExpression?.startText(text);
+      speakWithBody(eng, text);
+    },
+
+    setThinking(thinking: boolean): void {
+      setThinkingUi(thinking);
+      if (thinking) {
+        eng.busyUntil = Number.POSITIVE_INFINITY;
+        eng.expression?.thinking();
+      } else if (eng.busyUntil === Number.POSITIVE_INFINITY) {
+        eng.busyUntil = Date.now();
+      }
     },
 
     setEmotion(emotion: AgentEmotion): void {
@@ -238,11 +327,14 @@ function createVoidAgentBodyBridge(
     },
 
     stop(): void {
-      tts?.cancel();
+      if (eng.voice) eng.voice.cancel();
+      else tts?.cancel();
       lipSyncNoop?.cancel();
       lipSyncRhythm?.cancel();
       textVisemeExpression?.cancel(eng.vrm?.expressionManager);
       eng.animation?.play("IDLE");
+      eng.busyUntil = Date.now();
+      setAgentSpeech("");
     },
   };
 }
@@ -254,16 +346,22 @@ function VoidModel({
   mood,
   onAgentSpeech,
   onTtsChange,
+  onVoiceChange,
   onLipProbeChange,
   onLipSyncStatusChange,
   onRhythmStatusChange,
   onTextVisemeStatusChange,
   onVrmLoadedChange,
+  onBrainStatusChange,
+  onThinkingChange,
   engineRef,
 }: {
   mood: SkinProps["mood"];
   onAgentSpeech: (text: string) => void;
+  onBrainStatusChange?: (status: BrainStatus | null) => void;
+  onThinkingChange?: (thinking: boolean) => void;
   onTtsChange?: (tts: BrowserTtsController | null) => void;
+  onVoiceChange?: (voice: CompanionVoice | null) => void;
   onLipProbeChange?: (result: LipShapeProbeResult | null) => void;
   onLipSyncStatusChange?: (status: LipSyncNoopStatus | null) => void;
   onRhythmStatusChange?: (status: LipSyncRhythmStatus | null) => void;
@@ -276,6 +374,10 @@ function VoidModel({
   const stabilityElapsedRef = useRef(0);
   const activeVoidMotionRef = useRef<string>("IDLE");
   const [frame, setFrame] = useState<VrmFrameTransform | null>(null);
+  // 生命状态 mood：用 ref 供轮询读取，避免重装引擎
+  const moodRef = useRef<SkinProps["mood"]>(mood);
+  moodRef.current = mood;
+  const appliedMoodRef = useRef<SkinProps["mood"] | null>(null);
 
   // ─── 加载 VRM ───
   useEffect(() => {
@@ -449,6 +551,7 @@ function VoidModel({
         authority,
         gaze,
         stability,
+        busyUntil: 0,
       };
       engineRef.current = engine;
 
@@ -466,6 +569,14 @@ function VoidModel({
       });
       engine.tts = tts;
       onTtsChange?.(tts);
+      // 朗读门面：⚙ 里配置了克隆声音就用你的声音，否则系统语音（设置实时读取，改了立即生效）
+      const voice = new CompanionVoice({
+        browserTts: tts,
+        getSettings: () => companionSettings.get(),
+        fetchImpl: localFetch,
+      });
+      engine.voice = voice;
+      onVoiceChange?.(voice);
 
       // 7c. Day7 LipSync No-op Harness：安全壳，只收 speech 事件、暴露状态，不驱动嘴型
       const lipSyncNoop = new LipSyncNoopHarness();
@@ -496,14 +607,56 @@ function VoidModel({
 
       const agentBody = createVoidAgentBodyBridge(
         engine,
-        onAgentSpeech,
+        (text) => {
+          // 智能体说话 / 被打断后，让生命状态 mood 在空闲时重新接管表情
+          appliedMoodRef.current = null;
+          onAgentSpeech(text);
+        },
+        (thinking) => onThinkingChange?.(thinking),
         tts,
         lipSyncNoop,
         lipSyncRhythm,
         textVisemeExpression,
       );
-      const agentRuntime = new AgentRuntime(createDefaultDemoBrain(), agentBody);
+      // 多轮对话记忆（全局 conversationStore，localStorage 持久化；主动陪伴也读写它）
+      // 大脑按 ⚙ 陪伴设置实时切换：云端 / 本机 Ollama / 离线规则；人设与当前时间每次现算
+      const memory = conversationStore;
+      const brain = new CompanionBrain({ store: companionSettings, memory, fetchImpl: localFetch });
+      engine.memory = memory;
+      engine.brain = brain;
+      void brain.probe().then((st) => {
+        if (!cancelled) onBrainStatusChange?.(st);
+      });
+      // 设置变化（换厂商 / 改 Key）→ 防抖后重新探测，Brain 灯随之更新
+      let reprobeTimer: number | undefined;
+      const unsubscribeSettings = companionSettings.subscribe(() => {
+        window.clearTimeout(reprobeTimer);
+        reprobeTimer = window.setTimeout(() => {
+          void brain.reprobe().then((st) => onBrainStatusChange?.(st));
+        }, 800);
+      });
+      engine.unbindSettings = () => {
+        window.clearTimeout(reprobeTimer);
+        unsubscribeSettings();
+      };
+
+      const agentRuntime = new AgentRuntime(brain, agentBody);
       engine.agentRuntime = agentRuntime;
+
+      // 主动陪伴（RuntimeKernel → CognitionEngine → AVATAR_THOUGHT kind=speech）：
+      // 显示在和聊天回复同一个对话框里（不是头顶小气泡），并朗读 + 嘴型 + 记入对话记忆。
+      // 智能体正在思考 / 说话时不插话。
+      engine.unbindProactive = kernelEventBus.on("AVATAR_THOUGHT", (p) => {
+        if (p.kind !== "speech" || !p.text) return;
+        // 头顶 ThoughtBubble 也订阅了这条事件；下一拍清掉它，避免同一句话显示两遍
+        queueMicrotask(() => kernelEventBus.emit("AVATAR_THOUGHT", { kind: "clear" }));
+        if (Date.now() < engine.busyUntil) return;
+        engine.busyUntil = Date.now() + estimateSpeechHoldMs(p.text);
+        appliedMoodRef.current = null;
+        onAgentSpeech(p.text);
+        speakWithBody(engine, p.text);
+        memory.append("assistant", p.text);
+      });
       window.__avatarOSAgent = {
         receiveText(text: string) {
           return agentRuntime.receiveText(text);
@@ -513,6 +666,12 @@ function VoidModel({
         },
         snapshot() {
           return agentRuntime.snapshot();
+        },
+        clearMemory() {
+          memory.clear();
+        },
+        async reprobe() {
+          return brain.reprobe();
         },
       };
 
@@ -545,6 +704,9 @@ function VoidModel({
       cancelled = true;
       const eng = engineRef.current;
       if (eng) {
+        eng.unbindProactive?.();
+        eng.unbindSettings?.();
+        eng.voice?.dispose();
         eng.tts?.dispose();
         eng.lipSyncNoop?.cancel();
         eng.lipSyncRhythm?.cancel();
@@ -555,10 +717,12 @@ function VoidModel({
       }
       engineRef.current = null;
       onTtsChange?.(null);
+      onVoiceChange?.(null);
       onLipProbeChange?.(null);
       onLipSyncStatusChange?.(null);
       onRhythmStatusChange?.(null);
       onTextVisemeStatusChange?.(null);
+      onBrainStatusChange?.(null);
       delete window.__avatarOSAgent;
     };
   }, [vrm]);
@@ -586,10 +750,21 @@ function VoidModel({
       } else {
         onTextVisemeStatusChange?.(null);
       }
+
+      // 大脑真实状态（LLM / 规则回退）
+      if (eng?.brain && isStatusReportingBrain(eng.brain)) {
+        onBrainStatusChange?.(eng.brain.getStatus());
+      }
+
+      // 生命状态 → 表情：仅在智能体空闲且 mood 有变化时写入（不与说话表情抢）
+      if (eng && Date.now() >= eng.busyUntil && appliedMoodRef.current !== moodRef.current) {
+        applyMoodExpression(eng.expression, moodRef.current);
+        appliedMoodRef.current = moodRef.current;
+      }
     }, 500);
 
     return () => window.clearInterval(interval);
-  }, [onLipSyncStatusChange, onRhythmStatusChange, onTextVisemeStatusChange]);
+  }, [onLipSyncStatusChange, onRhythmStatusChange, onTextVisemeStatusChange, onBrainStatusChange]);
 
   // ─── 每帧管线（V2 Final Calibration 锁定顺序） ───
   useFrame((_, rawDelta) => {
@@ -671,15 +846,41 @@ function VoidModel({
 export function VoidVrmSkin({ mood }: SkinProps) {
   const [agentSpeech, setAgentSpeech] = useState("");
   const [tts, setTts] = useState<BrowserTtsController | null>(null);
+  const [voice, setVoice] = useState<CompanionVoice | null>(null);
   const [lipProbe, setLipProbe] = useState<LipShapeProbeResult | null>(null);
   const [lipSyncStatus, setLipSyncStatus] = useState<LipSyncNoopStatus | null>(null);
   const [rhythmStatus, setRhythmStatus] = useState<LipSyncRhythmStatus | null>(null);
   const [textVisemeStatus, setTextVisemeStatus] = useState<TextVisemeExpressionDriverStatus | null>(null);
   const engineRef = useRef<VrmEngine | null>(null);
+  const [brainStatus, setBrainStatus] = useState<BrainStatus | null>(null);
+  const [thinking, setThinking] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const companion = useCompanionSettings();
+  const displayName = companion.companionName.trim() || "VOID";
+
+  // 回话气泡：按文本长度自动淡出（此前会永久停留在角色身上）
+  useEffect(() => {
+    if (!agentSpeech) return;
+    const handle = window.setTimeout(() => setAgentSpeech(""), estimateSpeechHoldMs(agentSpeech));
+    return () => window.clearTimeout(handle);
+  }, [agentSpeech]);
 
   // Day15A：演示模式开关（仅控制调试可见性，不碰音频/表情/嘴型算法）
   const showDebug = useAdvancedDebug();
   const [brainReady, setBrainReady] = useState(false);
+  const brainState: "ok" | "warn" | "wait" = !brainReady
+    ? "wait"
+    : brainStatus?.source === "llm"
+      ? "ok"
+      : brainStatus?.source === "fallback"
+        ? "warn"
+        : "wait";
+  const brainTitle =
+    brainStatus?.source === "llm"
+      ? `大脑：${brainStatus.provider} 在线`
+      : brainStatus?.source === "fallback"
+        ? `大脑：${brainStatus.provider} 不可用，暂用固定回复（${brainStatus.lastError ?? "未知原因"}）`
+        : "大脑：探测中";
   const ttsAvailable = !!tts && tts.getStatus().available;
   const lipAvailable = !!lipProbe && lipProbe.available;
   const [vrmLoaded, setVrmLoaded] = useState(false);
@@ -705,6 +906,8 @@ export function VoidVrmSkin({ mood }: SkinProps) {
       <DemoStatusBar
         vrmLoaded={vrmLoaded}
         brainReady={brainReady}
+        brainState={brainState}
+        brainTitle={brainTitle}
         ttsAvailable={ttsAvailable}
         lipAvailable={lipAvailable}
         viteConnected={import.meta.env.DEV}
@@ -722,33 +925,70 @@ export function VoidVrmSkin({ mood }: SkinProps) {
             mood={mood}
             onAgentSpeech={setAgentSpeech}
             onTtsChange={setTts}
+            onVoiceChange={setVoice}
             onLipProbeChange={setLipProbe}
             onLipSyncStatusChange={setLipSyncStatus}
             onRhythmStatusChange={setRhythmStatus}
             onTextVisemeStatusChange={setTextVisemeStatus}
             onVrmLoadedChange={setVrmLoaded}
+            onBrainStatusChange={setBrainStatus}
+            onThinkingChange={setThinking}
             engineRef={engineRef}
           />
         </Suspense>
       </Canvas>
-      {agentSpeech ? (
-        <div className="avatar-agent-speech">{agentSpeech}</div>
+      {thinking ? (
+        <div className="avatar-agent-speech avatar-agent-speech--thinking" aria-live="polite">
+          <span className="avatar-thinking-dots"><i /><i /><i /></span>
+        </div>
+      ) : agentSpeech ? (
+        <div className="avatar-agent-speech" aria-live="polite">{agentSpeech}</div>
       ) : null}
 
       <AgentInputOverlay
+        placeholder={`和 ${displayName} 说句话`}
         onSubmit={async (text) => {
+          markUserActivity();
           await window.__avatarOSAgent?.receiveText(text);
+          markUserActivity();
         }}
       />
 
-      <VoiceControlOverlay tts={tts} lipProbe={lipProbe} showDebug={showDebug} />
-      <LipSyncControlOverlay
-        driver={engineRef.current?.textVisemeExpression ?? null}
-        getManager={() => engineRef.current?.vrm?.expressionManager ?? null}
-        status={textVisemeStatus}
-        lipProbe={lipProbe}
-        showDebug={showDebug}
-      />
+      <button
+        type="button"
+        className={"avatar-settings-toggle" + (settingsOpen ? " avatar-settings-toggle--active" : "")}
+        title={settingsOpen ? "收起设置" : "设置"}
+        aria-expanded={settingsOpen}
+        onClick={() => setSettingsOpen((v) => !v)}
+      >
+        ⚙
+      </button>
+
+      {settingsOpen ? (
+        <div className="avatar-settings-drawer" role="dialog" aria-label="设置">
+          <CompanionSettingsPanel
+            memoryCount={engineRef.current?.memory?.size() ?? conversationStore.size()}
+            onClearMemory={() => window.__avatarOSAgent?.clearMemory()}
+            onPreviewVoice={async (text) => {
+              if (!voice) throw new Error("声音模块还没准备好，稍后再试");
+              await voice.preview(text);
+            }}
+            onTestConnection={async () => {
+              const st = (await window.__avatarOSAgent?.reprobe()) ?? null;
+              if (st) setBrainStatus(st);
+              return st;
+            }}
+          />
+          <VoiceControlOverlay tts={tts} lipProbe={lipProbe} showDebug={showDebug} />
+          <LipSyncControlOverlay
+            driver={engineRef.current?.textVisemeExpression ?? null}
+            getManager={() => engineRef.current?.vrm?.expressionManager ?? null}
+            status={textVisemeStatus}
+            lipProbe={lipProbe}
+            showDebug={showDebug}
+          />
+        </div>
+      ) : null}
 
       {showDebug && lipSyncStatus ? (
         <div className="avatar-lip-sync-status">

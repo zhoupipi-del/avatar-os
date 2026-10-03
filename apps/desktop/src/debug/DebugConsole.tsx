@@ -56,9 +56,10 @@ const BODY_TESTS: { label: string; intent: PhysicalIntentType }[] = [
 
 const panelStyle: React.CSSProperties = {
   position: "fixed",
-  right: 12,
-  bottom: 12,
-  width: 340,
+  // 置于右上角「调试」按钮下方：放在右下角会压住对话输入框的「发送」按钮
+  right: 8,
+  top: 42,
+  width: "min(340px, calc(100vw - 16px))",
   maxHeight: "80vh",
   display: "flex",
   flexDirection: "column",
