@@ -137,6 +137,11 @@ export class AudioLipSyncDriver {
       }
     }
   }
+
+  detach(manager?: LipSyncExpressionManagerLike | null): void {
+    this.attachedAnalyser = null;
+    this.resetAll(manager);
+  }
 }
 
 function clamp01(v: number): number {

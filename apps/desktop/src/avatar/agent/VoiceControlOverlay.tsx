@@ -15,25 +15,28 @@ export interface VoiceControlOverlayProps {
   readonly tts: BrowserTtsController | null;
   readonly lipProbe?: LipShapeProbeResult | null;
   readonly showDebug?: boolean;
+  readonly onStop?: () => void;
 }
 
 export function VoiceControlOverlay({
   tts,
   lipProbe,
   showDebug,
+  onStop,
 }: VoiceControlOverlayProps) {
   const [state, setState] = useState<VoiceControlState>(
     DEFAULT_VOICE_CONTROL_STATE,
   );
   const [status, setStatus] = useState<BrowserTtsStatus | null>(null);
 
-  // 同步控件状态到 controller（下一次 speak 生效，不改动正在播放的 utterance）
+  // 参数在下一次 speak 生效；关闭语音时立即中止当前回复。
   useEffect(() => {
     if (!tts) {
       return;
     }
     applyVoiceControlState(clampVoiceControlState(state), tts);
-  }, [tts, state]);
+    if (!state.enabled) onStop?.();
+  }, [tts, state, onStop]);
 
   // 定期刷新 debug 状态（speaking/pending 由 WebView 异步更新）
   useEffect(() => {
@@ -73,8 +76,8 @@ export function VoiceControlOverlay({
         <button
           type="button"
           className="avatar-voice-control__stop"
-          disabled={!available}
-          onClick={() => tts.cancel()}
+          disabled={!available && !onStop}
+          onClick={() => onStop ? onStop() : tts.cancel()}
         >
           停止朗读
         </button>

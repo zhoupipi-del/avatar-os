@@ -17,6 +17,7 @@ export class AgentRuntime {
   private lastOutput: AgentBrainOutput | null = null;
   private error: string | null = null;
   private sequence = 0;
+  private pending: AbortController | null = null;
 
   constructor(
     private readonly brain: AgentBrain,
@@ -24,7 +25,12 @@ export class AgentRuntime {
   ) {}
 
   async receiveText(text: string): Promise<AgentBrainOutput | null> {
+    if (!text.trim()) return null;
     const currentSequence = ++this.sequence;
+    this.pending?.abort();
+    this.body.stop?.();
+    const pending = new AbortController();
+    this.pending = pending;
 
     this.isThinking = true;
     this.lastUserText = text;
@@ -35,6 +41,7 @@ export class AgentRuntime {
       const output = await this.brain.think({
         text,
         now: Date.now(),
+        signal: pending.signal,
       });
 
       if (currentSequence !== this.sequence) {
@@ -44,12 +51,7 @@ export class AgentRuntime {
       this.lastOutput = output;
       this.body.setThinking?.(false);
 
-      this.body.speakText(output.speech);
-      this.body.setEmotion(output.emotion);
-      // 招牌动作优先；身体没有这个动作时退回普通动作
-      if (!(output.motion && this.body.playMotion?.(output.motion))) {
-        this.body.playIntent(output.intent);
-      }
+      this.perform(output);
 
       return output;
     } catch (error) {
@@ -75,23 +77,36 @@ export class AgentRuntime {
       this.lastOutput = fallback;
       this.body.setThinking?.(false);
 
-      this.body.speakText(fallback.speech);
-      this.body.setEmotion(fallback.emotion);
-      this.body.playIntent(fallback.intent);
+      this.perform(fallback);
 
       return fallback;
     } finally {
       if (currentSequence === this.sequence) {
         this.isThinking = false;
+        this.pending = null;
       }
     }
   }
 
   interrupt(): void {
     this.sequence += 1;
+    this.pending?.abort();
+    this.pending = null;
     this.isThinking = false;
     this.body.setThinking?.(false);
     this.body.stop?.();
+  }
+
+  private perform(output: AgentBrainOutput): void {
+    if (this.body.perform) {
+      this.body.perform(output);
+      return;
+    }
+    this.body.setEmotion(output.emotion);
+    if (!(output.motion && this.body.playMotion?.(output.motion))) {
+      this.body.playIntent(output.intent);
+    }
+    this.body.speakText(output.speech);
   }
 
   snapshot(): AgentRuntimeSnapshot {

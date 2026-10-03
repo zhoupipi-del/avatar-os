@@ -33,6 +33,7 @@ export interface AgentIntent {
 export interface AgentBrainInput {
   readonly text: string;
   readonly now?: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface AgentBrainOutput {
@@ -48,6 +49,8 @@ export interface AgentBrain {
 }
 
 export interface AgentBodyBridge {
+  /** Execute a reply as one speech performance, synchronized with playback. */
+  perform?(output: AgentBrainOutput): void;
   speakText(text: string): void;
   playIntent(intent: AgentIntent): void;
   setEmotion(emotion: AgentEmotion): void;

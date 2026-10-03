@@ -23,6 +23,7 @@ import type {
   ChannelProperty,
 } from "@avatar-os/runtime";
 import { VOID_CALIBRATION, type VoidExpressionName } from "../void-calibration";
+import { coordinateFacialWeights } from "./facial-coordination";
 
 type VrmFace =
   | "happy"
@@ -136,6 +137,26 @@ export class VrmExpressionController
 
   public tilt(angleZDeg: number): void {
     this.tiltTarget = THREE.MathUtils.degToRad(angleZDeg);
+  }
+
+  /** Compose after blink/lip-sync writes, before vrm.update(). */
+  public coordinate(): void {
+    const manager = this.vrm.expressionManager;
+    if (manager && VOID_CALIBRATION.features.calibratedExpression && this.canWrite(
+      { bone: "expression", property: "morphTargetInfluences" as ChannelProperty }, "expression",
+    ) === "ALLOW") coordinateFacialWeights(manager, this.facialCurrent);
+  }
+
+  public reset(): void {
+    this.leanTarget = 0;
+    this.tiltTarget = 0;
+    for (const face of FACES) {
+      this.facialTargets[face] = 0;
+      this.facialCurrent[face] = 0;
+    }
+    if (this.canWrite({ bone: "expression", property: "morphTargetInfluences" as ChannelProperty }, "expression") === "ALLOW") {
+      for (const face of FACES) this.vrm.expressionManager?.setValue(face, 0);
+    }
   }
 
   /**

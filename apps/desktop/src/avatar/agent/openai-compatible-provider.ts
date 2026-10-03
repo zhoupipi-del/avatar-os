@@ -1,3 +1,4 @@
+import { withRequestSignal } from "./abortable-request";
 import type { LlmMessage, LlmProvider } from "./llm-provider";
 
 /**
@@ -86,6 +87,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
     systemPrompt: string,
     userText: string,
     history: readonly LlmMessage[] = [],
+    signal?: AbortSignal,
   ): Promise<string> {
     const configError = this.configError();
     if (configError) {
@@ -110,31 +112,28 @@ export class OpenAICompatibleProvider implements LlmProvider {
       body.response_format = { type: "json_object" };
     }
 
-    let res: Response;
     try {
-      res = await this.request(
-        `${this.baseUrl}/chat/completions`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-        this.timeoutMs,
-      );
+      return await withRequestSignal(this.timeoutMs, signal, async (requestSignal) => {
+        const res = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}` },
+          body: JSON.stringify(body),
+          signal: requestSignal,
+        });
+        if (!res.ok) throw new Error(describeHttpError(res.status, await safeText(res)));
+        const data = (await res.json()) as ChatCompletionResponse;
+        requestSignal.throwIfAborted();
+        const content = data.choices?.[0]?.message?.content ?? "";
+        if (!content.trim()) throw new Error(data.error?.message ?? "模型返回了空内容");
+        this.lastError = null;
+        return content;
+      });
     } catch (error) {
-      this.lastError = describeNetworkError(error);
+      signal?.throwIfAborted();
+      this.lastError = error instanceof Error && error.name !== "AbortError"
+        ? error.message : describeNetworkError(error);
       throw new Error(this.lastError);
     }
-
-    if (!res.ok) {
-      this.lastError = describeHttpError(res.status, await safeText(res));
-      throw new Error(this.lastError);
-    }
-
-    const data = (await res.json()) as ChatCompletionResponse;
-    const content = data.choices?.[0]?.message?.content ?? "";
-    if (!content.trim()) {
-      this.lastError = data.error?.message ?? "模型返回了空内容";
-      throw new Error(this.lastError);
-    }
-    this.lastError = null;
-    return content;
   }
 
   private configError(): string | null {
