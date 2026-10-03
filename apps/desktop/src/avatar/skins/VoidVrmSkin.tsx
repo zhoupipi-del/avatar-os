@@ -71,6 +71,7 @@ import {
   LipSyncNoopHarness,
   LipSyncTextRhythmDriver,
   TextVisemeExpressionDriver,
+  AudioLipSyncDriver,
   LipSyncControlOverlay,
   VoiceControlOverlay,
   ConversationMemory,
@@ -128,6 +129,8 @@ interface VrmEngine {
   unbindSettings?: () => void;
   /** 朗读门面：克隆声音（云端）/ 系统语音，负责在出声时启动嘴型 */
   voice?: CompanionVoice;
+  /** 实时音频频谱 → VRM 嘴形驱动（每帧在 useFrame 调用） */
+  audioLipSync?: AudioLipSyncDriver;
   /** 已成功加载的招牌动作 id */
   customMotionIds: Set<string>;
   /** 走路步态 + 上一帧叠加的骨骼（下一帧开头撤销） */
@@ -289,24 +292,28 @@ function createVoidAgentBodyBridge(
       if (!eng.expression) {
         return;
       }
+      const intensity = Math.max(
+        0,
+        Math.min(1, Number.isFinite(emotion.intensity) ? emotion.intensity : 1),
+      );
 
       switch (emotion.type) {
         case "happy":
-          eng.expression.happy();
+          eng.expression.happy(intensity);
           return;
         case "sad":
-          eng.expression.sad();
+          eng.expression.sad(intensity);
           return;
         case "thinking":
         case "curious":
-          eng.expression.thinking();
+          eng.expression.thinking(intensity);
           return;
         case "tired":
-          eng.expression.drowsy();
+          eng.expression.drowsy(intensity);
           return;
         case "neutral":
         default:
-          eng.expression.idle();
+          eng.expression.idle(intensity);
       }
     },
 
@@ -688,6 +695,14 @@ function VoidModel({
       engine.voice = voice;
       onVoiceChange?.(voice);
 
+      // 7f. 实时音频口型驱动：CompanionVoice 播放克隆声音时经 WebAudio 暴露频谱，
+      //     每帧把频谱喂给共振峰分析器得到元音权重写入嘴形；无音频时回落文本节奏口型。
+      const audioLipSync = new AudioLipSyncDriver();
+      if (engine.lipShapeProbe) {
+        audioLipSync.setEnabled(engine.lipShapeProbe.available);
+      }
+      engine.audioLipSync = audioLipSync;
+
       // 7c. Day7 LipSync No-op Harness：安全壳，只收 speech 事件、暴露状态，不驱动嘴型
       const lipSyncNoop = new LipSyncNoopHarness();
       engine.lipSyncNoop = lipSyncNoop;
@@ -951,10 +966,19 @@ function VoidModel({
     // 5. 眨眼写入
     eng.blink.update(delta);
 
-      // 5b. Day9-OneShot Text Viseme Expression Driver（唯一嘴型写入口）：
-      //     每帧用文本 viseme 时间线驱动嘴型（不接音频），
-      //     三闸门未全开时 writer 内部 no-op / 归零。Day8 rhythm 仅用于 UI 显示。
-      eng.textVisemeExpression?.update(eng.vrm?.expressionManager, delta);
+      // 5b. 口型写入口（互斥切换）：
+      //     - 克隆声音正在播放 → 走 AudioLipSyncDriver，实时频谱 → 元音嘴形（声音越响嘴张越大）
+      //     - 否则（系统语音 / 文本节奏 / 静音）→ 回落 TextVisemeExpressionDriver
+      if (eng.voice?.isAudioActive() && eng.audioLipSync) {
+        const analyser = eng.voice.getAnalyser();
+        if (analyser) {
+          eng.audioLipSync.attach(analyser);
+          eng.audioLipSync.tick(eng.vrm?.expressionManager ?? null, delta);
+        }
+      } else {
+        eng.audioLipSync?.resetAll(eng.vrm?.expressionManager);
+        eng.textVisemeExpression?.update(eng.vrm?.expressionManager, delta);
+      }
 
     // 6. VRM 内部 Humanoid / Expression / SpringBone 最终计算
     eng.vrm.update(delta);

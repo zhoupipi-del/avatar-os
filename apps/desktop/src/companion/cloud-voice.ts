@@ -191,6 +191,11 @@ export class CompanionVoice {
   private url: string | null = null;
   private status: CompanionVoiceStatus = { lastSource: null, lastError: null };
 
+  /** 实时音频频谱分析节点（仅克隆声音走 WebAudio 时存在；系统语音无 AudioNode） */
+  private analyser: AnalyserNode | null = null;
+  private audioCtx: AudioContext | null = null;
+  private audioPlaying = false;
+
   constructor(private readonly deps: CompanionVoiceDeps) {}
 
   getStatus(): CompanionVoiceStatus {
@@ -236,15 +241,20 @@ export class CompanionVoice {
       audio.volume = clamp(params.volume, 0, 1);
       this.audio = audio;
       this.url = url;
+      // 接 WebAudio 分析节点，供口型驱动读取实时频谱
+      this.attachAudioAnalysis(audio);
 
       let started = false;
       audio.addEventListener("playing", () => {
         if (started || mySeq !== this.seq) return;
         started = true;
+        this.audioPlaying = true;
+        this.resumeAudioCtx();
         cb.onStart?.();
       });
       audio.addEventListener("ended", () => {
         if (mySeq !== this.seq) return;
+        this.audioPlaying = false;
         this.releaseAudio();
         cb.onEnd?.();
       }, { once: true });
@@ -253,6 +263,7 @@ export class CompanionVoice {
       return this.setSource("clone", null);
     } catch (error) {
       if (mySeq !== this.seq) return this.status.lastSource ?? "clone";
+      this.audioPlaying = false;
       this.releaseAudio();
       const message = error instanceof Error ? error.message : String(error);
       console.warn("[CompanionVoice] clone voice failed, falling back to system voice:", message);
@@ -310,11 +321,72 @@ export class CompanionVoice {
       (this.deps.revokeObjectUrl ?? ((u) => URL.revokeObjectURL(u)))(this.url);
       this.url = null;
     }
+    this.audioPlaying = false;
+    this.analyser = null;
+    if (this.audioCtx) {
+      try {
+        void this.audioCtx.close();
+      } catch {
+        // ignore
+      }
+      this.audioCtx = null;
+    }
   }
 
   private setSource(source: VoiceSource, error: string | null): VoiceSource {
     this.status = { lastSource: source, lastError: error };
     return source;
+  }
+
+  /** 把 HTMLAudioElement 接进 WebAudio，创建 AnalyserNode 供口型驱动使用。 */
+  private attachAudioAnalysis(audio: PlayableAudio): void {
+    const el = audio as unknown as globalThis.HTMLAudioElement;
+    if (typeof HTMLAudioElement === "undefined" || !(el instanceof HTMLAudioElement)) {
+      return; // 系统语音回退（非 HTMLAudioElement）无 AudioNode，回落文本口型
+    }
+    try {
+      const Ctx: typeof AudioContext =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const src = ctx.createMediaElementSource(el);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.6;
+      src.connect(analyser);
+      analyser.connect(ctx.destination);
+      this.audioCtx = ctx;
+      this.analyser = analyser;
+    } catch {
+      this.analyser = null;
+      this.audioCtx = null;
+    }
+  }
+
+  private resumeAudioCtx(): void {
+    if (this.audioCtx && this.audioCtx.state === "suspended") {
+      void this.audioCtx.resume().catch(() => {});
+    }
+  }
+
+  /** 暴露实时频谱分析节点（供 VRM 口型驱动读取） */
+  getAnalyser(): AnalyserNode | null {
+    return this.analyser;
+  }
+
+  /** 是否正在播放克隆声音 */
+  isAudioPlaying(): boolean {
+    return this.audioPlaying;
+  }
+
+  /** 音频分析是否真正可用：有 analyser + 正在播放 + AudioContext 已运行 */
+  isAudioActive(): boolean {
+    return (
+      this.analyser !== null &&
+      this.audioPlaying &&
+      this.audioCtx?.state === "running"
+    );
   }
 }
 

@@ -89,42 +89,43 @@ export class VrmExpressionController
 
   // ─── 内部：面部预设切换 ───
 
-  private setPreset(name: VoidExpressionName): void {
+  private setPreset(name: VoidExpressionName, intensity = 1): void {
+    const k = intensity < 0 ? 0 : intensity > 1 ? 1 : intensity;
     const preset = VOID_CALIBRATION.expression.presets[name];
-    this.facialTargets.happy = preset.happy;
-    this.facialTargets.sad = preset.sad;
-    this.facialTargets.relaxed = preset.relaxed;
-    this.facialTargets.surprised = preset.surprised;
+    this.facialTargets.happy = preset.happy * k;
+    this.facialTargets.sad = preset.sad * k;
+    this.facialTargets.relaxed = preset.relaxed * k;
+    this.facialTargets.surprised = preset.surprised * k;
   }
 
   // ─── ExpressionController 接口实现 ───
 
-  public happy(): void {
-    this.setPreset("happy");
+  public happy(intensity = 1): void {
+    this.setPreset("happy", intensity);
     this.leanTarget = THREE.MathUtils.degToRad(-4);
     this.tiltTarget = THREE.MathUtils.degToRad(2);
   }
 
-  public sad(): void {
-    this.setPreset("sad");
+  public sad(intensity = 1): void {
+    this.setPreset("sad", intensity);
     this.leanTarget = THREE.MathUtils.degToRad(7);
     this.tiltTarget = 0;
   }
 
-  public thinking(): void {
-    this.setPreset("thinking");
+  public thinking(intensity = 1): void {
+    this.setPreset("thinking", intensity);
     this.leanTarget = 0;
     this.tiltTarget = THREE.MathUtils.degToRad(8);
   }
 
-  public drowsy(): void {
-    this.setPreset("drowsy");
+  public drowsy(intensity = 1): void {
+    this.setPreset("drowsy", intensity);
     this.leanTarget = THREE.MathUtils.degToRad(9);
     this.tiltTarget = THREE.MathUtils.degToRad(3);
   }
 
-  public idle(): void {
-    this.setPreset("idle");
+  public idle(intensity = 1): void {
+    this.setPreset("idle", intensity);
     this.leanTarget = 0;
     this.tiltTarget = 0;
   }
@@ -171,10 +172,11 @@ export class VrmExpressionController
               alpha,
             );
             manager.setValue(face, this.facialCurrent[face]);
-          }
-        }
       }
     }
+  }
+}
+
 
     // 躯干前后倾（chest/spine rotation.x，canWrite 闸门保留）
     if (

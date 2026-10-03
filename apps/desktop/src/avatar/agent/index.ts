@@ -40,3 +40,4 @@ export * from "./kokoro-model-smoke";
 export * from "./kokoro-output-normalizer";
 export * from "./kokoro-access-diagnostics";
 export * from "./kokoro-normalized-formant-pipeline";
+export * from "./audio-lip-sync";
