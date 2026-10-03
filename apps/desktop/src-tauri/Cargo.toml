@@ -1,6 +1,6 @@
 [package]
 name = "avatar-os-desktop"
-version = "0.4.0"
+version = "0.4.1"
 description = "AvatarOS Kernel desktop shell"
 authors = ["AvatarOS"]
 edition = "2021"
@@ -9,11 +9,12 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
-tauri-plugin-fs = { version = "2" }
-tauri-plugin-http = { version = "2" }
-tauri-plugin-autostart = { version = "2" }
+# 与 apps/desktop/package.json 的 @tauri-apps/* 锁在同一 minor：Tauri CLI 打包前会校验两边 major.minor 一致
+tauri = { version = "~2.12", features = ["tray-icon"] }
+tauri-plugin-sql = { version = "~2.4", features = ["sqlite"] }
+tauri-plugin-fs = { version = "~2.5" }
+tauri-plugin-http = { version = "~2.5" }
+tauri-plugin-autostart = { version = "~2.7" }
 serde_json = "1"
 windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 

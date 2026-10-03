@@ -80,6 +80,8 @@ export interface CompanionSettings {
   /** 安静时段（整点，本地时间）：start==end 表示不设 */
   quietStartHour: number;
   quietEndHour: number;
+  /** 闲着时在桌面上走动、偶尔做招牌动作 */
+  idleActivityEnabled: boolean;
   /** 朗读用哪种声音 */
   voiceMode: VoiceMode;
   voiceBaseUrl: string;
@@ -144,6 +146,7 @@ export function defaultSettingsFromEnv(env: CompanionEnv = viteEnv()): Companion
     proactiveIntervalMin: clampInt(Number(pick("VITE_COMPANION_PROACTIVE_MINUTES") ?? 45), 5, 24 * 60),
     quietStartHour: clampInt(Number(pick("VITE_COMPANION_QUIET_START") ?? 0), 0, 23),
     quietEndHour: clampInt(Number(pick("VITE_COMPANION_QUIET_END") ?? 8), 0, 23),
+    idleActivityEnabled: !/^(0|false|no)$/i.test(pick("VITE_COMPANION_WALK") ?? "true"),
     voiceMode: resolveVoiceMode(pick("VITE_VOICE_MODE"), pick("VITE_VOICE_ID"), pick("VITE_VOICE_API_KEY")),
     voiceBaseUrl: pick("VITE_VOICE_BASE_URL") ?? VOICE_DEFAULTS.baseUrl,
     voiceApiKey: pick("VITE_VOICE_API_KEY") ?? "",
@@ -260,6 +263,7 @@ function sanitize(input: Partial<CompanionSettings>): Partial<CompanionSettings>
   if (src.brainMode === "cloud" || src.brainMode === "ollama" || src.brainMode === "rule") out.brainMode = src.brainMode;
   if (typeof src.cloudPreset === "string" && src.cloudPreset in CLOUD_PRESETS) out.cloudPreset = src.cloudPreset as CloudPresetId;
   if (typeof src.proactiveEnabled === "boolean") out.proactiveEnabled = src.proactiveEnabled;
+  if (typeof src.idleActivityEnabled === "boolean") out.idleActivityEnabled = src.idleActivityEnabled;
   if (Number.isFinite(src.proactiveIntervalMin)) out.proactiveIntervalMin = clampInt(src.proactiveIntervalMin as number, 5, 24 * 60);
   if (Number.isFinite(src.quietStartHour)) out.quietStartHour = clampInt(src.quietStartHour as number, 0, 23);
   if (Number.isFinite(src.quietEndHour)) out.quietEndHour = clampInt(src.quietEndHour as number, 0, 23);

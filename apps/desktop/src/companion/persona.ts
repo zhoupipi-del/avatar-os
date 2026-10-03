@@ -4,6 +4,7 @@
  * 人设来源优先级：设置界面里填写的文本 > persona.local.md（私人，不入库）> persona.example.md（模板）
  * 系统提示词在每次对话时现算：带上当前日期 / 星期 / 时段，让它会说"早安""该睡了""周末去哪"。
  */
+import { describeCustomMotionsForPrompt } from "../avatar/custom-motions";
 import type { CompanionSettings } from "./companion-settings";
 
 // Vite eager glob：文件不存在时得到空对象（persona.local.md 是可选的私人文件）
@@ -72,6 +73,7 @@ export function buildChatSystemPrompt(settings: CompanionSettings, now = new Dat
     "结合之前的聊天记录自然接话，记住她说过的事。",
     COMPANION_GROUND_RULES,
     CHAT_FORMAT,
+    describeCustomMotionsForPrompt(),
   ]
     .filter(Boolean)
     .join("\n\n");

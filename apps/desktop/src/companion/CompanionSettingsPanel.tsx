@@ -193,6 +193,14 @@ export function CompanionSettingsPanel({ onTestConnection, memoryCount, onClearM
           />
           <span>她在电脑前、一阵没聊天时，主动说句话</span>
         </label>
+        <label className="companion-settings__check">
+          <input
+            type="checkbox"
+            checked={s.idleActivityEnabled}
+            onChange={(e) => update({ idleActivityEnabled: e.currentTarget.checked })}
+          />
+          <span>闲着时在桌面上走走、偶尔做招牌动作</span>
+        </label>
         <label className="companion-settings__field">
           <span>最多每</span>
           <span className="companion-settings__inline">
@@ -260,6 +268,11 @@ function HourSelect({ value, onChange }: { value: number; onChange: (v: number) 
  * 声音：系统语音 / 你的克隆声音（硅基流动 CosyVoice2，OpenAI 兼容 /audio/speech）。
  * 在这里上传 8–10 秒你的录音 + 逐字文本即可完成克隆，音色 uri 自动填入。
  */
+/** 硅基流动声音复刻接受的格式：mp3 / wav / pcm / opus（m4a、aac 会被拒绝） */
+export function isSupportedVoiceFile(name: string): boolean {
+  return /\.(mp3|wav|opus|pcm)$/i.test(name.trim());
+}
+
 function VoiceSection({ onPreviewVoice }: { onPreviewVoice?: (text: string) => Promise<void> }) {
   const s = useCompanionSettings();
   const update = companionSettings.update.bind(companionSettings);
@@ -272,6 +285,10 @@ function VoiceSection({ onPreviewVoice }: { onPreviewVoice?: (text: string) => P
   async function upload() {
     if (!file) {
       setMsg("⚠️ 先选择一段录音文件");
+      return;
+    }
+    if (!isSupportedVoiceFile(file.name)) {
+      setMsg("⚠️ 只支持 mp3 / wav / opus。手机录的 m4a 请先转成 mp3（见落地指南）");
       return;
     }
     setBusy("upload");
@@ -348,7 +365,7 @@ function VoiceSection({ onPreviewVoice }: { onPreviewVoice?: (text: string) => P
             </span>
             <input
               type="file"
-              accept="audio/*,.mp3,.wav,.m4a,.opus"
+              accept=".mp3,.wav,.opus,audio/mpeg,audio/wav,audio/x-wav,audio/opus"
               onChange={(e) => setFile(e.currentTarget.files?.[0] ?? null)}
             />
           </label>

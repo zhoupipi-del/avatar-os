@@ -4,6 +4,30 @@
 
 ---
 
+## v0.4.1 — 会走动、会做你的招牌动作 · 2026-10-03
+
+### 在桌面上走动
+- `companion/desktop-walker.ts`：空闲时每 4–10 分钟在当前显示器**工作区**内横向散步（不进任务栏、不出屏幕，高 DPI 按缩放换算）。
+  她按鼠标 / 打字、智能体开始思考或说话、困倦 / 睡着时不走，正在走的立刻停。⚙ → 主动陪伴可关（`VITE_COMPANION_WALK`）。
+- `avatar/vrm/walk-cycle.ts`：程序化步态，不需要走路动画文件——大腿交替摆动、迈步腿膝盖后屈、手臂反向摆、躯干轻扭，
+  起步 / 收步 0.3 秒渐变；身体转向行进方向（3/4 侧身），停下转回正面。
+  叠加每帧撤销（`restoreGait`），未被待机动画驱动的骨骼不会累积漂移。VRM 0.x 自动翻转轴向。
+- 新增权限 `core:window:allow-set-position`（仅移动自己的窗口）。
+
+### 你的招牌动作
+- `public/avatars/void/animations/custom/`：放 `.vrma` + `motions.json`（id / 文件 / 中文名 / 何时做 / 空闲权重），无需改代码。
+- 已加载的招牌动作自动写进聊天提示词；回复带 `"motion":"HEART"` 时播放它代替普通动作，身体没有该动作则退回普通动作。
+- `idleWeight > 0` 的动作空闲时每 6–15 分钟可能自己做一次。
+- 清单校验：id 规范、不撞内置动作、文件名不允许路径穿越、最多 16 个；单个文件坏了只跳过它（`loadExtraVrmActions` 用 allSettled），不影响内置动作。
+- 调试：`__avatarOSAgent.walk()` / `.playMotion(id)` / `.customMotions()`。
+
+### 验证
+- 新增 17 个单测（散步规划 / 边界 / DPI / 打断 / 失败兜底、步态交替与膝盖方向、渐入渐出、清单校验、权重抽取、提示词注入、motion 解析与回退）。
+- 浏览器实测：走路帧（侧身、后腿屈膝、摆臂）→ 停下转回正面；有效招牌动作加载并播放，路径穿越条目被拒、缺失文件被跳过。
+- 三道闸门 + `tauri build --no-bundle`（含 npm↔crate 版本校验）通过。
+
+---
+
 ## v0.4.0 — Companion Mode（陪伴模式）· 2026-10-03
 
 **状态切换：本地 Ollama 演示 → 不装模型、长得像你、说话像你、用你的声音，每天陪在她桌面上**
@@ -45,6 +69,12 @@
   `VITE_COMPANION_LOCK_SETTINGS=true` 隐藏 Key 与人设设置，且只认打包配置。
 - **开机自启**：首次运行（发布版）自动开启，托盘菜单「开机自动启动」可关；开发模式不写启动项。
 - `VRMUtils.rotateVRM0`：VRoid 导出 VRM 0.x 也自动转正，替换自己的形象不会背对屏幕。
+
+### 打包修复（真机反馈）
+- **Tauri 版本不一致导致 `tauri build` 拒绝打包**：`@tauri-apps/api` 2.11 ↔ `tauri` 2.12、`@tauri-apps/plugin-http` 2.8 ↔ `tauri-plugin-http` 2.5。
+  以 Cargo.lock 为准两边锁到同一 minor（npm 用 `~`，Cargo.toml 用 `~2.x`）；新增 `pnpm avatar:check-tauri-versions` 并纳入 v040 闸门。
+  此前只做了 `cargo check`，没跑 Tauri CLI 的版本校验——现在用 `tauri build --no-bundle` 全量 release 编译验证通过。
+- 声音样本拦截 m4a（硅基流动只接受 mp3 / wav / pcm / opus）。
 
 ### 验证
 - 新增 41 个单测（云端 Provider、设置存储 / 锁定 / 清洗、安静时段、人设提示词与底线、CompanionBrain 实时切换、主动陪伴 Provider、内核冷却与闸门、在场判定、云端语音 / 声音复刻 / 嘴型时序 / 失败回退 / 打断）。

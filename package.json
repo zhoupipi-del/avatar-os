@@ -26,7 +26,8 @@
     "avatar:kokoro-output-normalizer-gate": "node scripts/avatar/kokoro-output-normalizer-gate.mjs",
     "avatar:day15a-demo-gate": "node scripts/avatar/day15a-demo-gate.mjs",
     "avatar:v039-completion-gate": "node scripts/avatar/v039-completion-gate.mjs",
-    "avatar:v040-companion-gate": "node scripts/avatar/v040-companion-gate.mjs"
+    "avatar:v040-companion-gate": "node scripts/avatar/v040-companion-gate.mjs",
+    "avatar:check-tauri-versions": "node scripts/avatar/check-tauri-versions.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

@@ -29,13 +29,23 @@ import {
 import { NEUTRAL_EMOTIONAL_STATE, Mood } from "@avatar-os/primitives";
 import { gazeBus } from "./gazeBus";
 import { loadVrm, disposeVrm } from "../vrm/load-vrm";
-import { loadVrmActions } from "../vrm/load-vrma";
+import { loadVrmActions, loadExtraVrmActions } from "../vrm/load-vrma";
+import { GaitDriver, applyGait, restoreGait, facingYaw } from "../vrm/walk-cycle";
+import {
+  CUSTOM_MOTION_DIR,
+  customMotionRegistry,
+  loadCustomMotionManifest,
+  pickIdleMotion,
+  type CustomMotion,
+} from "../custom-motions";
+import { DesktopWalker, locomotionBus } from "../../companion/desktop-walker";
+import { createTauriWindowPort } from "../../platform/tauri-window-port";
 import { VrmBlinkController } from "../vrm/VrmBlinkController";
 import { VrmExpressionController } from "../vrm/VrmExpressionController";
 import { VrmGazeController } from "../vrm/VrmGazeController";
 import { VrmStabilityGuard } from "../vrm/VrmStabilityGuard";
 import { VOID_CALIBRATION, validateVoidCalibration } from "../void-calibration";
-import { getVoidMotionSemantic, validateVoidMotionSemantics } from "../void-motion-semantics";
+import { getVoidMotionSemantic, isVoidMotionId, validateVoidMotionSemantics } from "../void-motion-semantics";
 import {
   validateVoidV2RuntimeGate,
   assertVoidV2RuntimeGate,
@@ -85,6 +95,12 @@ declare global {
       snapshot(): unknown;
       clearMemory(): void;
       reprobe(): Promise<BrainStatus | null>;
+      /** 调试：立刻走两步（Tauri 内真的移动窗口；浏览器里原地踏步 4 秒） */
+      walk(): Promise<boolean>;
+      /** 调试：播放一个招牌动作 */
+      playMotion(id: string): boolean;
+      /** 已加载的招牌动作 */
+      customMotions(): readonly CustomMotion[];
     };
   }
 }
@@ -112,6 +128,13 @@ interface VrmEngine {
   unbindSettings?: () => void;
   /** 朗读门面：克隆声音（云端）/ 系统语音，负责在出声时启动嘴型 */
   voice?: CompanionVoice;
+  /** 已成功加载的招牌动作 id */
+  customMotionIds: Set<string>;
+  /** 走路步态 + 上一帧叠加的骨骼（下一帧开头撤销） */
+  gait: GaitDriver;
+  gaitSaved: Array<[THREE.Object3D, THREE.Quaternion]>;
+  walker?: DesktopWalker;
+  stopIdleActivity?: () => void;
 }
 
 /**
@@ -205,8 +228,8 @@ function installVoidMotionTracker(
     sequence += 1;
     const currentSequence = sequence;
 
-    const semantic = getVoidMotionSemantic(name);
-    activeMotionRef.current = semantic.id;
+    // 招牌动作没有内置语义：按"打招呼"类处理（视线叠加减弱，播完回待机）
+    activeMotionRef.current = isVoidMotionId(name) ? getVoidMotionSemantic(name).id : "GREET";
 
     rawPlayOnce(name, () => {
       if (sequence === currentSequence) {
@@ -287,6 +310,14 @@ function createVoidAgentBodyBridge(
       }
     },
 
+    playMotion(motionId: string): boolean {
+      const id = motionId.toUpperCase();
+      if (!eng.animation || !eng.customMotionIds.has(id)) return false;
+      eng.walker?.interrupt();
+      eng.animation.playOnce(id);
+      return true;
+    },
+
     playIntent(intent: AgentIntent): void {
       if (!eng.animation) {
         return;
@@ -336,6 +367,61 @@ function createVoidAgentBodyBridge(
       eng.busyUntil = Date.now();
       setAgentSpeech("");
     },
+  };
+}
+
+/** 疲惫 / 睡着时不走动、不做招牌动作 */
+const QUIET_MOODS = new Set<string>([Mood.TIRED, Mood.SLEEPING]);
+
+/**
+ * 闲时活动调度：走动（仅 Tauri）+ 空闲招牌动作。
+ * 条件：⚙ 开关打开、智能体空闲、没在播别的动作、她最近 10 秒没点击 / 打字、不是困倦状态。
+ * 她一按鼠标或开始打字，正在走的路立刻停下。返回清理函数。
+ */
+function startIdleActivity(
+  eng: VrmEngine,
+  getMood: () => SkinProps["mood"],
+  activeMotionRef: MutableRefObject<string>,
+): () => void {
+  let lastUserInput = 0;
+  const onUserInput = () => {
+    lastUserInput = Date.now();
+    eng.walker?.interrupt();
+  };
+  window.addEventListener("mousedown", onUserInput, true);
+  window.addEventListener("keydown", onUserInput, true);
+
+  const idleNow = () =>
+    companionSettings.get().idleActivityEnabled &&
+    Date.now() >= eng.busyUntil &&
+    Date.now() - lastUserInput > 10_000 &&
+    activeMotionRef.current === "IDLE" &&
+    !QUIET_MOODS.has(getMood());
+
+  const port = createTauriWindowPort();
+  if (port) {
+    eng.walker = new DesktopWalker({ port, canWalk: idleNow });
+    eng.walker.start();
+  }
+
+  // 招牌动作：空闲时每 6–15 分钟可能做一次（只挑 idleWeight > 0 的）
+  const nextDelay = () => Math.round((6 + Math.random() * 9) * 60_000);
+  let nextMotionAt = Date.now() + nextDelay();
+  const motionTimer = window.setInterval(() => {
+    if (Date.now() < nextMotionAt) return;
+    if (!eng.animation || eng.walker?.isWalking() || !idleNow()) return;
+    nextMotionAt = Date.now() + nextDelay();
+    const m = pickIdleMotion(customMotionRegistry.motions);
+    if (m && eng.customMotionIds.has(m.id)) eng.animation.playOnce(m.id);
+  }, 15_000);
+
+  return () => {
+    window.removeEventListener("mousedown", onUserInput, true);
+    window.removeEventListener("keydown", onUserInput, true);
+    window.clearInterval(motionTimer);
+    eng.walker?.stop();
+    eng.walker = undefined;
+    customMotionRegistry.motions = [];
   };
 }
 
@@ -440,6 +526,7 @@ function VoidModel({
 
       // 6. 动画系统（可选 VRMA，无则纯程序化）
       let animation: AnimationManager | null = null;
+      let customMotionsLoaded: CustomMotion[] = [];
       const actionUrls = VOID_AVATAR_PROFILE.actions;
 
       if (Object.keys(actionUrls).length > 0) {
@@ -449,6 +536,26 @@ function VoidModel({
             actionUrls,
             VOID_AVATAR_PROFILE.rootMotionMode,
           );
+
+          // 招牌动作（可选）：custom/motions.json 登记的 .vrma，坏一个跳一个，不影响内置动作
+          const manifest = await loadCustomMotionManifest();
+          if (manifest.motions.length > 0) {
+            const extra = await loadExtraVrmActions(
+              vrm,
+              loaded.mixer,
+              Object.fromEntries(manifest.motions.map((m) => [m.id, CUSTOM_MOTION_DIR + m.file])),
+              VOID_AVATAR_PROFILE.rootMotionMode,
+            );
+            Object.assign(loaded.actions, extra.actions);
+            customMotionsLoaded = manifest.motions.filter((m) => extra.actions[m.id]);
+            if (Object.keys(extra.failed).length > 0) {
+              console.warn("[VOID] 招牌动作加载失败（已跳过）：", extra.failed);
+            }
+          }
+          if (manifest.skipped.length > 0) {
+            console.warn("[VOID] motions.json 中被跳过的条目：", manifest.skipped);
+          }
+
           animation = new AnimationManager(loaded.mixer, loaded.actions, {
             idleClip: "IDLE",
           });
@@ -552,6 +659,9 @@ function VoidModel({
         gaze,
         stability,
         busyUntil: 0,
+        customMotionIds: new Set(customMotionsLoaded.map((m) => m.id)),
+        gait: new GaitDriver(),
+        gaitSaved: [],
       };
       engineRef.current = engine;
 
@@ -673,7 +783,30 @@ function VoidModel({
         async reprobe() {
           return brain.reprobe();
         },
+        async walk() {
+          if (engine.walker) return engine.walker.strollNow();
+          // 浏览器预览没有窗口可移动：原地踏步 4 秒，用来看步态
+          locomotionBus.walking = true;
+          locomotionBus.direction = 1;
+          locomotionBus.speed = 55;
+          window.setTimeout(() => {
+            locomotionBus.walking = false;
+            locomotionBus.direction = 0;
+            locomotionBus.speed = 0;
+          }, 4000);
+          return true;
+        },
+        playMotion(id: string) {
+          return agentBody.playMotion?.(id) ?? false;
+        },
+        customMotions() {
+          return customMotionRegistry.motions;
+        },
       };
+
+      // 9. 闲时活动：在桌面上走走 / 偶尔做个招牌动作（⚙ 可关）
+      customMotionRegistry.motions = customMotionsLoaded;
+      engine.stopIdleActivity = startIdleActivity(engine, () => moodRef.current, activeVoidMotionRef);
 
       // 8. DEV-only V2 Stability Gate（只传真实可提炼项，不伪造 body ids）
       if (import.meta.env.DEV) {
@@ -705,6 +838,8 @@ function VoidModel({
       const eng = engineRef.current;
       if (eng) {
         eng.unbindProactive?.();
+        eng.stopIdleActivity?.();
+        restoreGait(eng.gaitSaved);
         eng.unbindSettings?.();
         eng.voice?.dispose();
         eng.tts?.dispose();
@@ -773,12 +908,24 @@ function VoidModel({
 
     const delta = sanitizeFrameDelta(rawDelta);
 
-    // 1. 撤销上一帧程序化 LookAt 叠加
+    // 1. 撤销上一帧程序化 LookAt 叠加，再撤销上一帧走路步态（与叠加顺序相反）
     eng.gaze.clear(eng.vrm);
+    restoreGait(eng.gaitSaved);
 
     // 2. VRMA 写入当前动画基础姿态
     if (eng.animation) {
       eng.animation.tick(delta);
+    }
+
+    // 2b. 走路：在动画姿态上叠加步态，身体转向行进方向（停下转回正面）
+    eng.gaitSaved = applyGait(
+      eng.vrm,
+      eng.gait.update(locomotionBus.walking, locomotionBus.speed, delta),
+    );
+    const group = containerRef.current;
+    if (group) {
+      const targetYaw = VOID_AVATAR_PROFILE.rotationY + facingYaw(locomotionBus.walking ? locomotionBus.direction : 0);
+      group.rotation.y = THREE.MathUtils.lerp(group.rotation.y, targetYaw, Math.min(1, delta * 6));
     }
 
     // 3. 在动画姿态之后叠加 Head/Neck/Spine LookAt

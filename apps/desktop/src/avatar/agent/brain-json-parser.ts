@@ -48,6 +48,7 @@ export function parseBrainJsonOutput(
           : options.fallbackSpeech ?? DEFAULT_AGENT_OUTPUT.speech,
       intent: normalizeAgentIntent(parsed.intent),
       emotion: normalizeAgentEmotion(parsed.emotion),
+      ...normalizeMotionField(parsed.motion),
     };
   } catch {
     return {
@@ -111,4 +112,11 @@ export function extractFirstJsonObject(text: string): string | null {
   }
 
   return null;
+}
+
+/** motion 字段：只接受像 HEART / SCRATCH_HEAD 这样的 id，其余丢弃 */
+export function normalizeMotionField(value: unknown): { motion?: string } {
+  if (typeof value !== "string") return {};
+  const id = value.trim().toUpperCase();
+  return /^[A-Z][A-Z0-9_]{1,23}$/.test(id) && id !== "NONE" ? { motion: id } : {};
 }

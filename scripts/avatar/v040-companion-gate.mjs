@@ -40,6 +40,19 @@ has(resolve(SRC, "avatar/skins/VoidVrmSkin.tsx"), /onStart: startLip/, "lip-sync
 has(resolve(ROOT, "apps/desktop/src-tauri/capabilities/default.json"), /api\.siliconflow\.cn/, "http scope allows SiliconFlow");
 has(resolve(SRC, "companion/persona.ts"), /COMPANION_GROUND_RULES,/, "honesty / safety ground rules always in prompts");
 hasNot(resolve(SRC, "companion/cloud-voice.ts"), /sk-[A-Za-z0-9]{16,}/, "no voice key hardcoded");
+// 走动 + 招牌动作
+has(resolve(SRC, "companion/desktop-walker.ts"), /getWorkArea/, "walker stays inside the work area");
+has(resolve(SRC, "avatar/skins/VoidVrmSkin.tsx"), /restoreGait\(eng\.gaitSaved\)/, "gait overlay is undone every frame (no drift)");
+has(resolve(SRC, "avatar/skins/VoidVrmSkin.tsx"), /loadCustomMotionManifest\(\)/, "signature motions loaded from manifest");
+has(resolve(SRC, "avatar/vrm/load-vrma.ts"), /Promise\.allSettled/, "a broken signature motion cannot break built-in motions");
+has(resolve(ROOT, "apps/desktop/src-tauri/capabilities/default.json"), /core:window:allow-set-position/, "window may be moved (walking)");
+// Tauri npm ↔ crate 版本必须同一 minor（否则 tauri build 拒绝打包）
+try {
+  execSync("node scripts/avatar/check-tauri-versions.mjs", { cwd: ROOT, stdio: "pipe" });
+  ok("tauri npm packages and crates on matching major.minor");
+} catch (e) {
+  fail(`tauri version mismatch\n${String(e.stderr ?? e.stdout ?? "")}`);
+}
 
 for (const [label, cmd] of [
   ["tsc --noEmit (desktop)", "pnpm --filter desktop exec tsc --noEmit"],

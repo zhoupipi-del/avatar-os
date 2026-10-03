@@ -213,3 +213,11 @@ describe("voice settings", () => {
     expect(new CompanionSettingsStore(defaults, storage, false).get()).toMatchObject({ voiceId: "speech:tampered", voiceMode: "system" });
   });
 });
+
+describe("voice sample file types", () => {
+  it("accepts mp3/wav/opus/pcm and rejects phone m4a/aac", async () => {
+    const { isSupportedVoiceFile } = await import("./CompanionSettingsPanel");
+    expect(["a.mp3", "B.WAV", "c.opus", "d.pcm"].every(isSupportedVoiceFile)).toBe(true);
+    expect(["录音.m4a", "x.aac", "y.mp4"].some(isSupportedVoiceFile)).toBe(false);
+  });
+});

@@ -46,7 +46,10 @@ export class AgentRuntime {
 
       this.body.speakText(output.speech);
       this.body.setEmotion(output.emotion);
-      this.body.playIntent(output.intent);
+      // 招牌动作优先；身体没有这个动作时退回普通动作
+      if (!(output.motion && this.body.playMotion?.(output.motion))) {
+        this.body.playIntent(output.intent);
+      }
 
       return output;
     } catch (error) {

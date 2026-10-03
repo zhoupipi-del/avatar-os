@@ -86,3 +86,36 @@ export async function loadVrmActions(
 
   return { mixer, actions, clips };
 }
+
+/**
+ * 追加加载可选动作（招牌动作）到已有 mixer。与 loadVrmActions 不同：
+ * 单个文件失败只跳过它（allSettled），绝不拖垮内置动作。
+ */
+export async function loadExtraVrmActions(
+  vrm: VRM,
+  mixer: THREE.AnimationMixer,
+  urls: Readonly<Record<string, string>>,
+  rootMotionMode: "in-place" | "preserve",
+): Promise<{ actions: Record<string, THREE.AnimationAction>; failed: Record<string, string> }> {
+  const actions: Record<string, THREE.AnimationAction> = {};
+  const failed: Record<string, string> = {};
+  const entries = Object.entries(urls);
+  const results = await Promise.allSettled(
+    entries.map(async ([name, url]) => {
+      const source = await loadVrmAnimation(url);
+      let clip = createVRMAnimationClip(source, vrm);
+      clip.name = name;
+      if (rootMotionMode === "in-place") {
+        clip = makeClipInPlace(clip, vrm);
+        clip.name = name;
+      }
+      return [name, mixer.clipAction(clip)] as const;
+    }),
+  );
+  results.forEach((r, i) => {
+    const name = entries[i]![0];
+    if (r.status === "fulfilled") actions[name] = r.value[1];
+    else failed[name] = r.reason instanceof Error ? r.reason.message : String(r.reason);
+  });
+  return { actions, failed };
+}

@@ -1,0 +1,7 @@
+{
+  "motions": [
+    { "id": "HEART", "file": "heart.vrma", "label": "比心", "when": "开心、被夸、说喜欢她的时候", "idleWeight": 0 },
+    { "id": "SCRATCH_HEAD", "file": "scratch_head.vrma", "label": "挠头", "when": "不好意思、答不上来的时候", "idleWeight": 1 },
+    { "id": "STRETCH_ARMS", "file": "stretch.vrma", "label": "伸懒腰", "when": "累了、聊到休息的时候", "idleWeight": 2 }
+  ]
+}

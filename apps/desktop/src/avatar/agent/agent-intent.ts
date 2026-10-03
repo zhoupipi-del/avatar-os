@@ -39,6 +39,8 @@ export interface AgentBrainOutput {
   readonly speech: string;
   readonly intent: AgentIntent;
   readonly emotion: AgentEmotion;
+  /** 可选：招牌动作 id（如 HEART）。身体有这个动作时优先播放它，代替 intent 的动作 */
+  readonly motion?: string;
 }
 
 export interface AgentBrain {
@@ -49,6 +51,8 @@ export interface AgentBodyBridge {
   speakText(text: string): void;
   playIntent(intent: AgentIntent): void;
   setEmotion(emotion: AgentEmotion): void;
+  /** 播放招牌动作；身体没有这个动作返回 false（此时改播 intent 的动作） */
+  playMotion?(motionId: string): boolean;
   /** 进入 / 退出"思考中"（等待大脑回复期间），可选 */
   setThinking?(thinking: boolean): void;
   stop?(): void;
