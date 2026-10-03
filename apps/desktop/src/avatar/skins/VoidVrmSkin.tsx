@@ -13,7 +13,7 @@
  *   → render
  */
 
-import { useEffect, useRef, Suspense, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, Suspense, useState, type MutableRefObject } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
@@ -29,6 +29,16 @@ import {
 import { NEUTRAL_EMOTIONAL_STATE, Mood } from "@avatar-os/primitives";
 import { gazeBus } from "./gazeBus";
 import { loadVrm, disposeVrm } from "../vrm/load-vrm";
+import { synthesizeMissingExpressions } from "../vrm/expression-synth";
+import { inspectModel, type ModelHealth } from "../model-health";
+import {
+  MAX_MODEL_BYTES,
+  clearCustomAvatar,
+  loadCustomAvatar,
+  readCustomAvatarMeta,
+  saveCustomAvatar,
+  type CustomAvatarMeta,
+} from "../custom-avatar-store";
 import { loadVrmActions, loadExtraVrmActions } from "../vrm/load-vrma";
 import { GaitDriver, applyGait, restoreGait, facingYaw } from "../vrm/walk-cycle";
 import {
@@ -64,6 +74,7 @@ import { markUserActivity } from "../../companion/activity";
 import { useCompanionSettings } from "../../companion/useCompanionSettings";
 import { CompanionSettingsPanel } from "../../companion/CompanionSettingsPanel";
 import { CompanionVoice } from "../../companion/cloud-voice";
+import { AudioLipSyncDriver } from "../agent/audio-lip-sync";
 import {
   AgentInputOverlay,
   AgentRuntime,
@@ -71,7 +82,6 @@ import {
   LipSyncNoopHarness,
   LipSyncTextRhythmDriver,
   TextVisemeExpressionDriver,
-  AudioLipSyncDriver,
   LipSyncControlOverlay,
   VoiceControlOverlay,
   ConversationMemory,
@@ -102,6 +112,8 @@ declare global {
       playMotion(id: string): boolean;
       /** 已加载的招牌动作 */
       customMotions(): readonly CustomMotion[];
+      /** 换形象后试一下：说一句话（看嘴型）+ 开心表情 + 挥手 */
+      tryLook(): void;
     };
   }
 }
@@ -129,7 +141,7 @@ interface VrmEngine {
   unbindSettings?: () => void;
   /** 朗读门面：克隆声音（云端）/ 系统语音，负责在出声时启动嘴型 */
   voice?: CompanionVoice;
-  /** 实时音频频谱 → VRM 嘴形驱动（每帧在 useFrame 调用） */
+  /** 振幅口型驱动：克隆声音在播时读实时频谱驱动嘴形，否则回落文本节奏 */
   audioLipSync?: AudioLipSyncDriver;
   /** 已成功加载的招牌动作 id */
   customMotionIds: Set<string>;
@@ -292,10 +304,7 @@ function createVoidAgentBodyBridge(
       if (!eng.expression) {
         return;
       }
-      const intensity = Math.max(
-        0,
-        Math.min(1, Number.isFinite(emotion.intensity) ? emotion.intensity : 1),
-      );
+      const intensity = Math.max(0, Math.min(1, Number.isFinite(emotion.intensity) ? emotion.intensity : 1));
 
       switch (emotion.type) {
         case "happy":
@@ -313,7 +322,7 @@ function createVoidAgentBodyBridge(
           return;
         case "neutral":
         default:
-          eng.expression.idle(intensity);
+          eng.expression.idle();
       }
     },
 
@@ -445,6 +454,9 @@ function VoidModel({
   onRhythmStatusChange,
   onTextVisemeStatusChange,
   onVrmLoadedChange,
+  modelUrl,
+  onModelHealth,
+  onModelError,
   onBrainStatusChange,
   onThinkingChange,
   engineRef,
@@ -460,6 +472,11 @@ function VoidModel({
   onRhythmStatusChange?: (status: LipSyncRhythmStatus | null) => void;
   onTextVisemeStatusChange?: (status: TextVisemeExpressionDriverStatus | null) => void;
   onVrmLoadedChange?: (loaded: boolean) => void;
+  /** 要加载的 VRM（默认形象或导入的模型的 blob: 地址） */
+  modelUrl: string;
+  onModelHealth?: (health: ModelHealth) => void;
+  /** 模型加载失败 / 不可用（导入的模型出问题时，外层退回默认形象） */
+  onModelError?: (message: string) => void;
   engineRef: MutableRefObject<VrmEngine | null>;
 }) {
   const [vrm, setVrm] = useState<import("@pixiv/three-vrm").VRM | null>(null);
@@ -477,10 +494,19 @@ function VoidModel({
     let cancelled = false;
     let disposedVrm: import("@pixiv/three-vrm").VRM | undefined;
 
-    loadVrm(VOID_AVATAR_PROFILE.modelUrl)
+    loadVrm(modelUrl)
       .then((loaded) => {
         if (cancelled) {
           disposeVrm(loaded);
+          return;
+        }
+        // 写实 / 非 VRoid 模型常缺标准表情：用自带的面部变形补全，眨眼和嘴型才能动
+        const synth = synthesizeMissingExpressions(loaded);
+        const health = inspectModel(loaded, synth);
+        onModelHealth?.(health);
+        if (!health.usable) {
+          disposeVrm(loaded);
+          onModelError?.(health.items[0]?.detail ?? "模型不可用");
           return;
         }
         setVrm(loaded);
@@ -488,6 +514,7 @@ function VoidModel({
       })
       .catch((err) => {
         console.error("[VOID] Failed to load VRM:", err);
+        onModelError?.(err instanceof Error ? err.message : String(err));
       });
 
     return () => {
@@ -695,14 +722,6 @@ function VoidModel({
       engine.voice = voice;
       onVoiceChange?.(voice);
 
-      // 7f. 实时音频口型驱动：CompanionVoice 播放克隆声音时经 WebAudio 暴露频谱，
-      //     每帧把频谱喂给共振峰分析器得到元音权重写入嘴形；无音频时回落文本节奏口型。
-      const audioLipSync = new AudioLipSyncDriver();
-      if (engine.lipShapeProbe) {
-        audioLipSync.setEnabled(engine.lipShapeProbe.available);
-      }
-      engine.audioLipSync = audioLipSync;
-
       // 7c. Day7 LipSync No-op Harness：安全壳，只收 speech 事件、暴露状态，不驱动嘴型
       const lipSyncNoop = new LipSyncNoopHarness();
       engine.lipSyncNoop = lipSyncNoop;
@@ -729,6 +748,11 @@ function VoidModel({
         );
       }
       engine.textVisemeExpression = textVisemeExpression;
+
+      // 振幅口型驱动：克隆声音在播时读实时频谱 → 元音权重 → VRM 嘴形；否则回落文本节奏
+      const audioLipSync = new AudioLipSyncDriver();
+      audioLipSync.setEnabled(!!engine.lipShapeProbe?.available);
+      engine.audioLipSync = audioLipSync;
 
       const agentBody = createVoidAgentBodyBridge(
         engine,
@@ -816,6 +840,12 @@ function VoidModel({
         },
         customMotions() {
           return customMotionRegistry.motions;
+        },
+        tryLook() {
+          const name = companionSettings.get().companionName.trim() || "我";
+          agentBody.speakText(`你好呀，我是${name}。看看我的嘴型和表情，自然吗？`);
+          agentBody.setEmotion({ type: "happy", intensity: 0.8 });
+          agentBody.playIntent({ type: "GREET", intensity: 0.8 });
         },
       };
 
@@ -966,9 +996,7 @@ function VoidModel({
     // 5. 眨眼写入
     eng.blink.update(delta);
 
-      // 5b. 口型写入口（互斥切换）：
-      //     - 克隆声音正在播放 → 走 AudioLipSyncDriver，实时频谱 → 元音嘴形（声音越响嘴张越大）
-      //     - 否则（系统语音 / 文本节奏 / 静音）→ 回落 TextVisemeExpressionDriver
+      // 5b. 振幅口型（克隆声音在播时走真实音频频谱；否则回落文本节奏口型）
       if (eng.voice?.isAudioActive() && eng.audioLipSync) {
         const analyser = eng.voice.getAnalyser();
         if (analyser) {
@@ -976,7 +1004,7 @@ function VoidModel({
           eng.audioLipSync.tick(eng.vrm?.expressionManager ?? null, delta);
         }
       } else {
-        eng.audioLipSync?.resetAll(eng.vrm?.expressionManager);
+        eng.audioLipSync?.resetAll(eng.vrm?.expressionManager ?? null);
         eng.textVisemeExpression?.update(eng.vrm?.expressionManager, delta);
       }
 
@@ -1026,6 +1054,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
   const [brainStatus, setBrainStatus] = useState<BrainStatus | null>(null);
   const [thinking, setThinking] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [vrmLoaded, setVrmLoaded] = useState(false);
   const companion = useCompanionSettings();
   const displayName = companion.companionName.trim() || "VOID";
 
@@ -1047,6 +1076,80 @@ export function VoidVrmSkin({ mood }: SkinProps) {
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
   }, []);
   const dockVisible = hovering || inputActive || thinking || settingsOpen;
+
+  // —— 形象：默认模型，或用户在 ⚙ 里导入的 .vrm（存在本机，不用改程序目录、不用重新打包） ——
+  const [modelSrc, setModelSrc] = useState<{ url: string; key: number; custom: boolean } | null>(null);
+  const [modelHealth, setModelHealth] = useState<ModelHealth | null>(null);
+  const [modelMeta, setModelMeta] = useState<CustomAvatarMeta | null>(() => readCustomAvatarMeta());
+  const [modelNotice, setModelNotice] = useState<string | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
+
+  const applyModel = useCallback((bytes: Uint8Array | null) => {
+    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+    blobUrlRef.current = bytes ? URL.createObjectURL(new Blob([bytes as BlobPart], { type: "model/gltf-binary" })) : null;
+    setVrmLoaded(false);
+    setModelSrc((prev) => ({
+      url: blobUrlRef.current ?? VOID_AVATAR_PROFILE.modelUrl,
+      key: (prev?.key ?? 0) + 1,
+      custom: !!bytes,
+    }));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadCustomAvatar().then((bytes) => {
+      if (!cancelled) applyModel(bytes);
+    });
+    return () => {
+      cancelled = true;
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+    };
+  }, [applyModel]);
+
+  const onModelError = useCallback(
+    (message: string) => {
+      if (!modelSrc?.custom) return;
+      setModelNotice(`导入的形象加载失败，已换回默认形象（${message.slice(0, 80)}）`);
+      void clearCustomAvatar();
+      setModelMeta(null);
+      applyModel(null);
+    },
+    [modelSrc?.custom, applyModel],
+  );
+
+  /** 导入：先完整解析 + 体检，确认能用再保存并换上；不能用就原样报错，不动现在的形象 */
+  const importModel = useCallback(
+    async (file: File): Promise<ModelHealth> => {
+      if (!/\.vrm$/i.test(file.name)) throw new Error("请选择 .vrm 文件");
+      if (file.size > MAX_MODEL_BYTES) throw new Error("文件太大（超过 120 MB），请在生成工具里选较低的贴图 / 面数再导出");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const probeUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "model/gltf-binary" }));
+      let health: ModelHealth;
+      try {
+        const probe = await loadVrm(probeUrl);
+        health = inspectModel(probe, synthesizeMissingExpressions(probe));
+        disposeVrm(probe);
+      } catch {
+        throw new Error("这个文件打不开，不是有效的 VRM 模型");
+      } finally {
+        URL.revokeObjectURL(probeUrl);
+      }
+      if (!health.usable) throw new Error(health.items[0]?.detail ?? "模型缺少必要的身体骨骼");
+      await saveCustomAvatar(bytes, file.name);
+      setModelMeta(readCustomAvatarMeta());
+      setModelNotice(null);
+      applyModel(bytes);
+      return health;
+    },
+    [applyModel],
+  );
+
+  const resetModel = useCallback(async () => {
+    await clearCustomAvatar();
+    setModelMeta(null);
+    setModelNotice(null);
+    applyModel(null);
+  }, [applyModel]);
 
   // 回话气泡：按文本长度自动淡出（此前会永久停留在角色身上）
   useEffect(() => {
@@ -1073,7 +1176,6 @@ export function VoidVrmSkin({ mood }: SkinProps) {
         : "大脑：探测中";
   const ttsAvailable = !!tts && tts.getStatus().available;
   const lipAvailable = !!lipProbe && lipProbe.available;
-  const [vrmLoaded, setVrmLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1118,7 +1220,11 @@ export function VoidVrmSkin({ mood }: SkinProps) {
         <directionalLight position={[3, 5, 4]} intensity={1.3} />
         <directionalLight position={[-3, 2, -2]} intensity={0.45} />
         <Suspense fallback={null}>
-          <VoidModel
+          {modelSrc ? <VoidModel
+            key={modelSrc.key}
+            modelUrl={modelSrc.url}
+            onModelHealth={setModelHealth}
+            onModelError={onModelError}
             mood={mood}
             onAgentSpeech={setAgentSpeech}
             onTtsChange={setTts}
@@ -1131,7 +1237,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
             onBrainStatusChange={setBrainStatus}
             onThinkingChange={setThinking}
             engineRef={engineRef}
-          />
+          /> : null}
         </Suspense>
       </Canvas>
       {thinking || agentSpeech ? (
@@ -1193,6 +1299,13 @@ export function VoidVrmSkin({ mood }: SkinProps) {
             onPreviewVoice={async (text) => {
               if (!voice) throw new Error("声音模块还没准备好，稍后再试");
               await voice.preview(text);
+            }}
+            model={{
+              meta: modelMeta,
+              health: modelHealth,
+              notice: modelNotice,
+              onImport: importModel,
+              onReset: resetModel,
             }}
             onTestConnection={async () => {
               const st = (await window.__avatarOSAgent?.reprobe()) ?? null;

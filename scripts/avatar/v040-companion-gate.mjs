@@ -46,6 +46,10 @@ has(resolve(SRC, "avatar/skins/VoidVrmSkin.tsx"), /restoreGait\(eng\.gaitSaved\)
 has(resolve(SRC, "avatar/skins/VoidVrmSkin.tsx"), /loadCustomMotionManifest\(\)/, "signature motions loaded from manifest");
 has(resolve(SRC, "avatar/vrm/load-vrma.ts"), /Promise\.allSettled/, "a broken signature motion cannot break built-in motions");
 has(resolve(ROOT, "apps/desktop/src-tauri/capabilities/default.json"), /core:window:allow-set-position/, "window may be moved (walking)");
+// 形象导入 + 表情自动补全
+has(resolve(SRC, "avatar/skins/VoidVrmSkin.tsx"), /synthesizeMissingExpressions\(loaded\)/, "imported models get missing expressions synthesized");
+has(resolve(SRC, "avatar/skins/VoidVrmSkin.tsx"), /throw new Error\("这个文件打不开/, "imports are validated before replacing the current model");
+has(resolve(SRC, "avatar/custom-avatar-store.ts"), /BaseDirectory\.AppLocalData/, "imported model stored in app data, not the program folder");
 // Tauri npm ↔ crate 版本必须同一 minor（否则 tauri build 拒绝打包）
 try {
   execSync("node scripts/avatar/check-tauri-versions.mjs", { cwd: ROOT, stdio: "pipe" });

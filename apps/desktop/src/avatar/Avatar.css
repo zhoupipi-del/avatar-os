@@ -1211,3 +1211,40 @@
 .avatar-root .thought-bubble .thought-emoji {
   display: none;
 }
+
+/* —— 设置：形象体检单 / 选文件按钮 —— */
+.companion-model-health {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.companion-model-health b { display: inline-block; width: 14px; }
+.companion-model-health__ok b { color: #6edc96; }
+.companion-model-health__auto b { color: #9ecbff; }
+.companion-model-health__missing { color: rgba(255, 255, 255, 0.72); }
+.companion-model-health__missing b { color: #ff8fa8; }
+.companion-settings__filebtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: #d9466f;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.companion-settings__filebtn.is-busy { opacity: 0.6; cursor: default; }
+.companion-settings__filebtn input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.companion-settings__filebtn:focus-within { outline: 2px solid #f6a3bb; outline-offset: 2px; }

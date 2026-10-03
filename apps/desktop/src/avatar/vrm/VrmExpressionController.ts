@@ -92,10 +92,10 @@ export class VrmExpressionController
   private setPreset(name: VoidExpressionName, intensity = 1): void {
     const k = intensity < 0 ? 0 : intensity > 1 ? 1 : intensity;
     const preset = VOID_CALIBRATION.expression.presets[name];
-    this.facialTargets.happy = preset.happy * k;
-    this.facialTargets.sad = preset.sad * k;
-    this.facialTargets.relaxed = preset.relaxed * k;
-    this.facialTargets.surprised = preset.surprised * k;
+    this.facialTargets.happy = (preset?.happy ?? 0) * k;
+    this.facialTargets.sad = (preset?.sad ?? 0) * k;
+    this.facialTargets.relaxed = (preset?.relaxed ?? 0) * k;
+    this.facialTargets.surprised = (preset?.surprised ?? 0) * k;
   }
 
   // ─── ExpressionController 接口实现 ───
@@ -124,8 +124,8 @@ export class VrmExpressionController
     this.tiltTarget = THREE.MathUtils.degToRad(3);
   }
 
-  public idle(intensity = 1): void {
-    this.setPreset("idle", intensity);
+  public idle(): void {
+    this.setPreset("idle");
     this.leanTarget = 0;
     this.tiltTarget = 0;
   }
@@ -172,11 +172,10 @@ export class VrmExpressionController
               alpha,
             );
             manager.setValue(face, this.facialCurrent[face]);
+          }
+        }
       }
     }
-  }
-}
-
 
     // 躯干前后倾（chest/spine rotation.x，canWrite 闸门保留）
     if (

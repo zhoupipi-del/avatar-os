@@ -190,8 +190,7 @@ export class CompanionVoice {
   private audio: PlayableAudio | null = null;
   private url: string | null = null;
   private status: CompanionVoiceStatus = { lastSource: null, lastError: null };
-
-  /** 实时音频频谱分析节点（仅克隆声音走 WebAudio 时存在；系统语音无 AudioNode） */
+  /** 振幅口型用：当前播放的 AnalyserNode（每句话换新 audio 元素，对应新 analyser） */
   private analyser: AnalyserNode | null = null;
   private audioCtx: AudioContext | null = null;
   private audioPlaying = false;
@@ -241,7 +240,6 @@ export class CompanionVoice {
       audio.volume = clamp(params.volume, 0, 1);
       this.audio = audio;
       this.url = url;
-      // 接 WebAudio 分析节点，供口型驱动读取实时频谱
       this.attachAudioAnalysis(audio);
 
       let started = false;
@@ -292,6 +290,9 @@ export class CompanionVoice {
     audio.volume = clamp(this.deps.browserTts.getVoiceParams().volume, 0, 1);
     this.audio = audio;
     this.url = url;
+    this.attachAudioAnalysis(audio);
+    this.audioPlaying = true;
+    this.resumeAudioCtx();
     audio.addEventListener("ended", () => this.releaseAudio(), { once: true });
     await audio.play();
   }
@@ -321,72 +322,69 @@ export class CompanionVoice {
       (this.deps.revokeObjectUrl ?? ((u) => URL.revokeObjectURL(u)))(this.url);
       this.url = null;
     }
-    this.audioPlaying = false;
-    this.analyser = null;
-    if (this.audioCtx) {
+    if (this.analyser) {
       try {
-        void this.audioCtx.close();
+        this.analyser.disconnect();
       } catch {
         // ignore
       }
+      this.analyser = null;
+    }
+    if (this.audioCtx) {
+      this.audioCtx.close().catch(() => {});
       this.audioCtx = null;
     }
+    this.audioPlaying = false;
   }
 
-  private setSource(source: VoiceSource, error: string | null): VoiceSource {
-    this.status = { lastSource: source, lastError: error };
-    return source;
-  }
-
-  /** 把 HTMLAudioElement 接进 WebAudio，创建 AnalyserNode 供口型驱动使用。 */
+  /** 把 HTMLAudioElement 接入 WebAudio，暴露实时频谱供口型驱动读取 */
   private attachAudioAnalysis(audio: PlayableAudio): void {
-    const el = audio as unknown as globalThis.HTMLAudioElement;
-    if (typeof HTMLAudioElement === "undefined" || !(el instanceof HTMLAudioElement)) {
-      return; // 系统语音回退（非 HTMLAudioElement）无 AudioNode，回落文本口型
-    }
     try {
-      const Ctx: typeof AudioContext =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!Ctx) return;
-      const ctx = new Ctx();
-      const src = ctx.createMediaElementSource(el);
-      const analyser = ctx.createAnalyser();
+      const el = audio as unknown as HTMLAudioElement;
+      if (!el || typeof el.play !== "function") return;
+      const w = window as unknown as {
+        AudioContext?: typeof AudioContext;
+        webkitAudioContext?: typeof AudioContext;
+      };
+      const Ctor = w.AudioContext ?? w.webkitAudioContext;
+      if (!Ctor) return;
+      if (!this.audioCtx) this.audioCtx = new Ctor();
+      const src = this.audioCtx.createMediaElementSource(el);
+      const analyser = this.audioCtx.createAnalyser();
       analyser.fftSize = 1024;
       analyser.smoothingTimeConstant = 0.6;
       src.connect(analyser);
-      analyser.connect(ctx.destination);
-      this.audioCtx = ctx;
+      analyser.connect(this.audioCtx.destination);
       this.analyser = analyser;
     } catch {
+      // 环境不支持 WebAudio 时忽略，口型回落文本节奏
       this.analyser = null;
-      this.audioCtx = null;
     }
   }
 
   private resumeAudioCtx(): void {
     if (this.audioCtx && this.audioCtx.state === "suspended") {
-      void this.audioCtx.resume().catch(() => {});
+      this.audioCtx.resume().catch(() => {});
     }
   }
 
-  /** 暴露实时频谱分析节点（供 VRM 口型驱动读取） */
+  /** 供振幅口型驱动读取的频谱源；无则 null */
   getAnalyser(): AnalyserNode | null {
     return this.analyser;
   }
 
-  /** 是否正在播放克隆声音 */
+  /** 克隆声音正在播放且频谱源可用时为 true */
+  isAudioActive(): boolean {
+    return this.analyser !== null && this.audioPlaying && this.audioCtx?.state === "running";
+  }
+
   isAudioPlaying(): boolean {
     return this.audioPlaying;
   }
 
-  /** 音频分析是否真正可用：有 analyser + 正在播放 + AudioContext 已运行 */
-  isAudioActive(): boolean {
-    return (
-      this.analyser !== null &&
-      this.audioPlaying &&
-      this.audioCtx?.state === "running"
-    );
+  private setSource(source: VoiceSource, error: string | null): VoiceSource {
+    this.status = { lastSource: source, lastError: error };
+    return source;
   }
 }
 

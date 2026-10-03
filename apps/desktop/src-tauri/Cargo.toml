@@ -1,6 +1,6 @@
 [package]
 name = "avatar-os-desktop"
-version = "0.4.2"
+version = "0.4.3"
 description = "AvatarOS Kernel desktop shell"
 authors = ["AvatarOS"]
 edition = "2021"

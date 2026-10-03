@@ -12,6 +12,8 @@ import {
   type VoiceMode,
 } from "./companion-settings";
 import { uploadVoiceSample } from "./cloud-voice";
+import type { ModelHealth } from "../avatar/model-health";
+import type { CustomAvatarMeta } from "../avatar/custom-avatar-store";
 import { localFetch } from "../platform/local-fetch";
 import { useCompanionSettings } from "./useCompanionSettings";
 import { bundledPersona, hasLocalPersonaFile } from "./persona";
@@ -24,9 +26,19 @@ export interface CompanionSettingsPanelProps {
   readonly onClearMemory: () => void;
   /** 用当前声音设置试听一句（失败时 reject，带可读原因） */
   readonly onPreviewVoice?: (text: string) => Promise<void>;
+  /** 形象（3D 模型）导入 / 恢复 / 体检结果 */
+  readonly model?: ModelSectionProps;
 }
 
-export function CompanionSettingsPanel({ onTestConnection, memoryCount, onClearMemory, onPreviewVoice }: CompanionSettingsPanelProps) {
+export interface ModelSectionProps {
+  readonly meta: CustomAvatarMeta | null;
+  readonly health: ModelHealth | null;
+  readonly notice: string | null;
+  readonly onImport: (file: File) => Promise<ModelHealth>;
+  readonly onReset: () => Promise<void>;
+}
+
+export function CompanionSettingsPanel({ onTestConnection, memoryCount, onClearMemory, onPreviewVoice, model }: CompanionSettingsPanelProps) {
   const s = useCompanionSettings();
   const locked = companionSettings.isLocked();
   const [testing, setTesting] = useState(false);
@@ -57,6 +69,7 @@ export function CompanionSettingsPanel({ onTestConnection, memoryCount, onClearM
 
   return (
     <div className="companion-settings">
+      {!locked && model ? <ModelSection {...model} /> : null}
       {!locked ? (
         <section className="companion-settings__card">
           <h4>大脑</h4>
@@ -408,6 +421,88 @@ function VoiceSection({ onPreviewVoice }: { onPreviewVoice?: (text: string) => P
           <small className="companion-settings__hint">合成失败会自动改用系统语音，不会没声音。</small>
         </>
       ) : null}
+    </section>
+  );
+}
+
+const LEVEL_MARK: Record<string, string> = { ok: "✓", auto: "✓", missing: "✗" };
+
+/**
+ * 形象：选一个 .vrm 文件就换上（先体检，能用才换）；体检单用大白话告诉你眨眼 / 口型 / 表情 / 骨骼能不能用。
+ */
+function ModelSection({ meta, health, notice, onImport, onReset }: ModelSectionProps) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function pick(file: File | undefined) {
+    if (!file) return;
+    setBusy(true);
+    setMsg("正在检查模型…");
+    try {
+      await onImport(file);
+      setMsg("✅ 已换上新形象");
+    } catch (e) {
+      setMsg(`⚠️ ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="companion-settings__card">
+      <h4>形象</h4>
+      <div className="companion-settings__row">
+        <span>
+          现在：{meta ? meta.fileName : "默认形象"}
+          {meta ? <small>（{(meta.bytes / 1024 / 1024).toFixed(1)} MB）</small> : null}
+        </span>
+      </div>
+
+      {health ? (
+        <ul className="companion-model-health">
+          {health.items.map((item) => (
+            <li key={item.label} className={`companion-model-health__${item.level}`}>
+              <b>{LEVEL_MARK[item.level]}</b> {item.label}：{item.detail}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="companion-settings__row">
+        <label className={"companion-settings__filebtn" + (busy ? " is-busy" : "")}>
+          {busy ? "检查中…" : "更换形象（选择 .vrm）"}
+          <input
+            type="file"
+            accept=".vrm"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.currentTarget.files?.[0];
+              e.currentTarget.value = "";
+              void pick(f);
+            }}
+          />
+        </label>
+        <button type="button" disabled={busy} onClick={() => window.__avatarOSAgent?.tryLook()}>
+          试一下
+        </button>
+        {meta ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setMsg(null);
+              void onReset();
+            }}
+          >
+            恢复默认形象
+          </button>
+        ) : null}
+      </div>
+      {notice ? <small className="companion-settings__hint">⚠️ {notice}</small> : null}
+      {msg ? <small className="companion-settings__hint">{msg}</small> : null}
+      <small className="companion-settings__hint">
+        没有模型？写实风格：用一张正脸自拍在 vtubeme.com 生成 VRM；卡通风格：用免费的 VRoid Studio 捏一个导出 VRM。
+      </small>
     </section>
   );
 }
