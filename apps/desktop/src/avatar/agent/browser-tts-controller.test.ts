@@ -115,4 +115,37 @@ describe("BrowserTtsController", () => {
 
     expect(synth.cancel).toHaveBeenCalledTimes(1);
   });
+
+  it("starts on the actual speech event and ignores stale events after cancellation", () => {
+    const synth = createSynth();
+    const controller = new BrowserTtsController({ speechSynthesis: synth, utteranceCtor: FakeUtterance as unknown as typeof SpeechSynthesisUtterance });
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    controller.speak("第一句", { onStart, onEnd });
+    const first = vi.mocked(synth.speak).mock.calls[0][0];
+    expect(onStart).not.toHaveBeenCalled();
+    first.onstart?.call(first, {} as SpeechSynthesisEvent);
+    expect(onStart).toHaveBeenCalledOnce();
+    controller.cancel();
+    expect(onEnd).toHaveBeenCalledOnce();
+    first.onend?.call(first, {} as SpeechSynthesisEvent);
+    first.onstart?.call(first, {} as SpeechSynthesisEvent);
+    expect(onStart).toHaveBeenCalledOnce();
+    expect(onEnd).toHaveBeenCalledOnce();
+  });
+
+  it("ends once on speech errors and stops immediately when disabled", () => {
+    const synth = createSynth();
+    const controller = new BrowserTtsController({ speechSynthesis: synth, utteranceCtor: FakeUtterance as unknown as typeof SpeechSynthesisUtterance });
+    const onEnd = vi.fn();
+    controller.speak("第一句", { onEnd });
+    const first = vi.mocked(synth.speak).mock.calls[0][0];
+    first.onerror?.call(first, {} as SpeechSynthesisErrorEvent);
+    first.onend?.call(first, {} as SpeechSynthesisEvent);
+    expect(onEnd).toHaveBeenCalledOnce();
+    controller.speak("第二句", { onEnd });
+    controller.setEnabled(false);
+    expect(onEnd).toHaveBeenCalledTimes(2);
+    expect(synth.cancel).toHaveBeenCalledTimes(3);
+  });
 });

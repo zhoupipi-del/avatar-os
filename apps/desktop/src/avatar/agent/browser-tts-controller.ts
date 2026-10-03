@@ -20,6 +20,11 @@ export interface BrowserTtsStatus {
 type SpeechSynthesisUtteranceConstructor =
   new (text: string) => SpeechSynthesisUtterance;
 
+export interface BrowserSpeechCallbacks {
+  readonly onStart?: () => void;
+  readonly onEnd?: () => void;
+}
+
 export class BrowserTtsController {
   private enabled: boolean;
   private readonly lang: string;
@@ -30,6 +35,8 @@ export class BrowserTtsController {
   private readonly utteranceCtor: SpeechSynthesisUtteranceConstructor | null;
 
   private selectedVoice: SpeechSynthesisVoice | null = null;
+  private sequence = 0;
+  private onCancel: (() => void) | null = null;
 
   constructor(options: BrowserTtsControllerOptions = {}) {
     this.enabled = options.enabled ?? true;
@@ -51,14 +58,15 @@ export class BrowserTtsController {
     this.refreshVoice();
   }
 
-  speak(text: string): void {
+  speak(text: string, callbacks: BrowserSpeechCallbacks = {}): boolean {
     const content = text.trim();
 
     if (!this.enabled || !content || !this.isAvailable()) {
-      return;
+      return false;
     }
 
     this.cancel();
+    const sequence = this.sequence;
     this.refreshVoice();
 
     const utterance = new this.utteranceCtor!(content);
@@ -66,6 +74,22 @@ export class BrowserTtsController {
     utterance.rate = this.rate;
     utterance.pitch = this.pitch;
     utterance.volume = this.volume;
+    let started = false;
+    let finished = false;
+    utterance.onstart = () => {
+      if (sequence !== this.sequence || started || finished) return;
+      started = true;
+      callbacks.onStart?.();
+    };
+    const finish = () => {
+      if (sequence !== this.sequence || finished) return;
+      finished = true;
+      this.onCancel = null;
+      callbacks.onEnd?.();
+    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    this.onCancel = () => callbacks.onEnd?.();
 
     if (this.selectedVoice) {
       utterance.voice = this.selectedVoice;
@@ -73,12 +97,19 @@ export class BrowserTtsController {
 
     try {
       this.synth!.speak(utterance);
+      return true;
     } catch {
       // Browser TTS must never break avatar runtime.
+      this.onCancel = null;
+      return false;
     }
   }
 
   cancel(): void {
+    this.sequence += 1;
+    const onCancel = this.onCancel;
+    this.onCancel = null;
+    onCancel?.();
     if (!this.synth) {
       return;
     }
@@ -96,6 +127,7 @@ export class BrowserTtsController {
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+    if (!enabled) this.cancel();
   }
 
   setOptions(

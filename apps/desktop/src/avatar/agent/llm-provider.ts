@@ -23,6 +23,7 @@ export interface LlmProvider {
     systemPrompt: string,
     userText: string,
     history?: readonly LlmMessage[],
+    signal?: AbortSignal,
   ): Promise<string>;
 
   /** 健康检查：供应商是否可达（可选，供上层策略使用） */

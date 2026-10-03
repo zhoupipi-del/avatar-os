@@ -65,6 +65,7 @@ export class CloudTtsClient {
   }
 
   async synthesize(text: string, opts: { speed?: number; signal?: AbortSignal } = {}): Promise<Blob> {
+    opts.signal?.throwIfAborted();
     const controller = new AbortController();
     const timer = globalThis.setTimeout(() => controller.abort(), this.timeoutMs);
     const onOuterAbort = () => controller.abort();
@@ -89,6 +90,7 @@ export class CloudTtsClient {
         throw new VoiceRequestError(describeVoiceHttpError(res.status, await safeText(res)), res.status);
       }
       const blob = await res.blob();
+      controller.signal.throwIfAborted();
       if (blob.size === 0) throw new VoiceRequestError("语音服务返回了空音频");
       // 有的服务把错误以 200 + JSON 返回
       if (/json/i.test(blob.type)) {
@@ -173,7 +175,7 @@ export interface CompanionVoiceDeps {
 export interface SpeakCallbacks {
   /** 声音真正开始时（启动嘴型） */
   readonly onStart?: () => void;
-  /** 云端音频播放结束（收嘴）。系统语音不回调——沿用原有文本节奏收嘴 */
+  /** Audio or system speech ended, failed, or was cancelled. */
   readonly onEnd?: () => void;
 }
 
@@ -194,6 +196,7 @@ export class CompanionVoice {
   private analyser: AnalyserNode | null = null;
   private audioCtx: AudioContext | null = null;
   private audioPlaying = false;
+  private callbacks: SpeakCallbacks | null = null;
 
   constructor(private readonly deps: CompanionVoiceDeps) {}
 
@@ -206,6 +209,7 @@ export class CompanionVoice {
     const content = text.trim();
     this.cancel();
     const mySeq = this.seq;
+    this.callbacks = cb;
     const tts = this.deps.browserTts;
 
     // TTS 总开关关闭：不出声，嘴型照常（与原行为一致）
@@ -216,9 +220,7 @@ export class CompanionVoice {
 
     const settings = this.deps.getSettings();
     if (!isCloneVoiceReady(settings)) {
-      tts.speak(content);
-      cb.onStart?.();
-      return this.setSource("system", null);
+      return this.speakSystem(content, cb, mySeq, "system", null);
     }
 
     const params = tts.getVoiceParams();
@@ -252,12 +254,23 @@ export class CompanionVoice {
       });
       audio.addEventListener("ended", () => {
         if (mySeq !== this.seq) return;
+        this.seq += 1;
         this.audioPlaying = false;
         this.releaseAudio();
+        this.callbacks = null;
+        cb.onEnd?.();
+      }, { once: true });
+      audio.addEventListener("error", () => {
+        if (mySeq !== this.seq) return;
+        this.seq += 1;
+        this.releaseAudio();
+        this.callbacks = null;
+        this.setSource("clone", "音频播放失败");
         cb.onEnd?.();
       }, { once: true });
 
       await audio.play();
+      if (mySeq !== this.seq) return this.status.lastSource ?? "clone";
       return this.setSource("clone", null);
     } catch (error) {
       if (mySeq !== this.seq) return this.status.lastSource ?? "clone";
@@ -265,9 +278,7 @@ export class CompanionVoice {
       this.releaseAudio();
       const message = error instanceof Error ? error.message : String(error);
       console.warn("[CompanionVoice] clone voice failed, falling back to system voice:", message);
-      tts.speak(content);
-      cb.onStart?.();
-      return this.setSource("clone-fallback", message);
+      return this.speakSystem(content, cb, mySeq, "clone-fallback", message);
     }
   }
 
@@ -278,13 +289,17 @@ export class CompanionVoice {
       throw new VoiceRequestError("请先填写语音 API Key 和音色");
     }
     this.cancel();
+    const mySeq = this.seq;
+    const abort = new AbortController();
+    this.abort = abort;
     const blob = await new CloudTtsClient({
       baseUrl: settings.voiceBaseUrl,
       apiKey: settings.voiceApiKey,
       model: settings.voiceModel,
       voice: settings.voiceId,
       fetchImpl: this.deps.fetchImpl,
-    }).synthesize(text, { speed: this.deps.browserTts.getVoiceParams().rate });
+    }).synthesize(text, { speed: this.deps.browserTts.getVoiceParams().rate, signal: abort.signal });
+    if (mySeq !== this.seq) return;
     const url = (this.deps.createObjectUrl ?? ((b) => URL.createObjectURL(b)))(blob);
     const audio = (this.deps.createAudio ?? ((u) => new Audio(u) as unknown as PlayableAudio))(url);
     audio.volume = clamp(this.deps.browserTts.getVoiceParams().volume, 0, 1);
@@ -293,7 +308,9 @@ export class CompanionVoice {
     this.attachAudioAnalysis(audio);
     this.audioPlaying = true;
     this.resumeAudioCtx();
-    audio.addEventListener("ended", () => this.releaseAudio(), { once: true });
+    const release = () => { if (mySeq === this.seq) this.releaseAudio(); };
+    audio.addEventListener("ended", release, { once: true });
+    audio.addEventListener("error", release, { once: true });
     await audio.play();
   }
 
@@ -303,6 +320,9 @@ export class CompanionVoice {
     this.abort = null;
     this.releaseAudio();
     this.deps.browserTts.cancel();
+    const callbacks = this.callbacks;
+    this.callbacks = null;
+    callbacks?.onEnd?.();
   }
 
   dispose(): void {
@@ -380,6 +400,25 @@ export class CompanionVoice {
 
   isAudioPlaying(): boolean {
     return this.audioPlaying;
+  }
+
+  private speakSystem(
+    text: string, callbacks: SpeakCallbacks, sequence: number,
+    source: VoiceSource, error: string | null,
+  ): VoiceSource {
+    const accepted = this.deps.browserTts.speak(text, {
+      onStart: () => { if (sequence === this.seq) callbacks.onStart?.(); },
+      onEnd: () => {
+        if (sequence !== this.seq) return;
+        this.callbacks = null;
+        callbacks.onEnd?.();
+      },
+    });
+    if (!accepted) {
+      callbacks.onStart?.();
+      return this.setSource("muted", error);
+    }
+    return this.setSource(source, error);
   }
 
   private setSource(source: VoiceSource, error: string | null): VoiceSource {

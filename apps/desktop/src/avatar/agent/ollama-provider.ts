@@ -1,3 +1,4 @@
+import { withRequestSignal } from "./abortable-request";
 import type { LlmMessage, LlmProvider } from "./llm-provider";
 
 export interface OllamaProviderOptions {
@@ -57,53 +58,57 @@ export class OllamaProvider implements LlmProvider {
     systemPrompt: string,
     userText: string,
     history: readonly LlmMessage[] = [],
+    signal?: AbortSignal,
   ): Promise<string> {
-    const response = await this.fetchWithTimeout(
-      `${this.baseUrl}/api/chat`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: this.model,
-          stream: false,
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt,
-            },
-            ...history
-              .filter((m) => m.role !== "system" && m.content.trim().length > 0)
-              .map((m) => ({ role: m.role, content: m.content })),
-            {
-              role: "user",
-              content: userText,
-            },
-          ],
-          options: {
-            temperature: 0.2,
-            num_predict: 256,
+    return withRequestSignal(this.timeoutMs, signal, async (requestSignal) => {
+      const response = await this.fetchImpl(
+        `${this.baseUrl}/api/chat`,
+        {
+          method: "POST",
+          signal: requestSignal,
+          headers: {
+            "Content-Type": "application/json",
           },
-        }),
-      },
-      this.timeoutMs,
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Ollama request failed: ${response.status} ${response.statusText}`,
+          body: JSON.stringify({
+            model: this.model,
+            stream: false,
+            messages: [
+              {
+                role: "system",
+                content: systemPrompt,
+              },
+              ...history
+                .filter((m) => m.role !== "system" && m.content.trim().length > 0)
+                .map((m) => ({ role: m.role, content: m.content })),
+              {
+                role: "user",
+                content: userText,
+              },
+            ],
+            options: {
+              temperature: 0.2,
+              num_predict: 256,
+            },
+          }),
+        },
       );
-    }
 
-    const data = (await response.json()) as OllamaChatResponse;
-    const content = data.message?.content ?? data.response ?? "";
+      if (!response.ok) {
+        throw new Error(
+          `Ollama request failed: ${response.status} ${response.statusText}`,
+        );
+      }
 
-    if (!content.trim()) {
-      throw new Error("Ollama returned empty content.");
-    }
+      const data = (await response.json()) as OllamaChatResponse;
+      requestSignal.throwIfAborted();
+      const content = data.message?.content ?? data.response ?? "";
 
-    return content;
+      if (!content.trim()) {
+        throw new Error("Ollama returned empty content.");
+      }
+
+      return content;
+    });
   }
 
   getModel(): string {

@@ -68,9 +68,11 @@ export class CompanionBrain implements StatusReportingBrain {
   constructor(private readonly options: CompanionBrainOptions) {}
 
   async think(input: AgentBrainInput): Promise<AgentBrainOutput> {
+    input.signal?.throwIfAborted();
     const brain = this.current();
     if (brain) return brain.think(input);
     const out = await this.rule.think(input);
+    input.signal?.throwIfAborted();
     if (this.options.memory && input.text.trim()) {
       this.options.memory.append("user", input.text, input.now);
       this.options.memory.append("assistant", out.speech);

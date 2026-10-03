@@ -23,7 +23,7 @@ function audioResponse() {
 
 function fakeTts(enabled = true) {
   return {
-    speak: vi.fn(),
+    speak: vi.fn((_text: string, callbacks?: { onStart?: () => void }) => { callbacks?.onStart?.(); return true; }),
     cancel: vi.fn(),
     getStatus: () => ({ available: true, enabled, speaking: false, pending: false, voiceName: null, lang: "zh-CN" }),
     getVoiceParams: () => ({ rate: 1.2, pitch: 1, volume: 0.6 }),
@@ -120,12 +120,63 @@ describe("uploadVoiceSample", () => {
 });
 
 describe("CompanionVoice", () => {
+  it("forwards real system speech events, including cancellation, without early lip movement", async () => {
+    const tts = fakeTts();
+    let events!: { onStart?: () => void; onEnd?: () => void };
+    tts.speak.mockImplementation((_text: string, callbacks: typeof events) => { events = callbacks; return true; });
+    const voice = new CompanionVoice({ browserTts: tts, getSettings: () => ({ ...CLONE, voiceMode: "system" }) });
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    await voice.speak("你好", { onStart, onEnd });
+    expect(onStart).not.toHaveBeenCalled();
+    events.onStart?.();
+    expect(onStart).toHaveBeenCalledOnce();
+    voice.cancel();
+    events.onEnd?.();
+    events.onStart?.();
+    expect(onStart).toHaveBeenCalledOnce();
+    expect(onEnd).toHaveBeenCalledOnce();
+  });
+
+  it("releases failed audio and prevents its old error event from stopping a new sentence", async () => {
+    const { factory, created } = fakeAudioFactory();
+    const voice = new CompanionVoice({ browserTts: fakeTts(), getSettings: () => CLONE, fetchImpl: async () => audioResponse(), createAudio: factory, ...urls });
+    const firstEnd = vi.fn();
+    const secondEnd = vi.fn();
+    await voice.speak("第一句", { onEnd: firstEnd });
+    created[0].fire("playing");
+    created[0].fire("error");
+    expect(firstEnd).toHaveBeenCalledOnce();
+    expect(created[0].paused).toBe(true);
+    expect(voice.isAudioPlaying()).toBe(false);
+    await voice.speak("第二句", { onEnd: secondEnd });
+    created[1].fire("playing");
+    created[0].fire("error");
+    expect(created[1].paused).toBe(false);
+    expect(secondEnd).not.toHaveBeenCalled();
+    created[1].fire("ended");
+    expect(secondEnd).toHaveBeenCalledOnce();
+  });
+
+  it("does not start a voice preview that was cancelled during synthesis", async () => {
+    const { factory, created } = fakeAudioFactory();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const voice = new CompanionVoice({ browserTts: fakeTts(), getSettings: () => CLONE, fetchImpl: async () => { await pending; return audioResponse(); }, createAudio: factory, ...urls });
+    const preview = voice.preview("试听");
+    const rejected = expect(preview).rejects.toMatchObject({ name: "AbortError" });
+    voice.cancel();
+    release();
+    await rejected;
+    expect(created).toHaveLength(0);
+  });
+
   it("system mode: speaks via browser TTS and starts lips immediately", async () => {
     const tts = fakeTts();
     const voice = new CompanionVoice({ browserTts: tts, getSettings: () => ({ ...CLONE, voiceMode: "system" }), fetchImpl: vi.fn() });
     const onStart = vi.fn();
     expect(await voice.speak("你好", { onStart })).toBe("system");
-    expect(tts.speak).toHaveBeenCalledWith("你好");
+    expect(tts.speak).toHaveBeenCalledWith("你好", expect.any(Object));
     expect(onStart).toHaveBeenCalledOnce();
   });
 
@@ -151,7 +202,7 @@ describe("CompanionVoice", () => {
     const voice = new CompanionVoice({ browserTts: tts, getSettings: () => CLONE, fetchImpl: async () => new Response("", { status: 402 }) });
     const onStart = vi.fn();
     expect(await voice.speak("早点睡", { onStart })).toBe("clone-fallback");
-    expect(tts.speak).toHaveBeenCalledWith("早点睡");
+    expect(tts.speak).toHaveBeenCalledWith("早点睡", expect.any(Object));
     expect(onStart).toHaveBeenCalledOnce();
     expect(voice.getStatus().lastError).toContain("余额不足");
   });

@@ -74,6 +74,7 @@ import { markUserActivity } from "../../companion/activity";
 import { useCompanionSettings } from "../../companion/useCompanionSettings";
 import { CompanionSettingsPanel } from "../../companion/CompanionSettingsPanel";
 import { CompanionVoice } from "../../companion/cloud-voice";
+import { SpeechPerformance } from "../../companion/speech-performance";
 import { AudioLipSyncDriver } from "../agent/audio-lip-sync";
 import {
   AgentInputOverlay,
@@ -141,8 +142,9 @@ interface VrmEngine {
   unbindSettings?: () => void;
   /** 朗读门面：克隆声音（云端）/ 系统语音，负责在出声时启动嘴型 */
   voice?: CompanionVoice;
-  /** 振幅口型驱动：克隆声音在播时读实时频谱驱动嘴形，否则回落文本节奏 */
+  /** 五元音频谱口型；无频谱时回落文本节奏。 */
   audioLipSync?: AudioLipSyncDriver;
+  performance?: SpeechPerformance;
   /** 已成功加载的招牌动作 id */
   customMotionIds: Set<string>;
   /** 走路步态 + 上一帧叠加的骨骼（下一帧开头撤销） */
@@ -154,27 +156,10 @@ interface VrmEngine {
 
 /**
  * 说一句话：朗读 + 嘴型。嘴型在声音真正开始时才启动（云端合成有网络延迟），
- * 云端音频播完即收嘴；系统语音沿用原有文本节奏。
+ * 实际音频 / 系统语音结束时统一收嘴。
  */
-function speakWithBody(eng: VrmEngine, text: string): void {
-  const startLip = () => {
-    eng.busyUntil = Date.now() + estimateSpeechHoldMs(text);
-    eng.lipSyncNoop?.notifySpeechText(text);
-    eng.lipSyncRhythm?.startText(text);
-    eng.textVisemeExpression?.startText(text);
-  };
-  if (eng.voice) {
-    void eng.voice.speak(text, {
-      onStart: startLip,
-      onEnd: () => {
-        eng.lipSyncRhythm?.cancel();
-        eng.textVisemeExpression?.cancel(eng.vrm?.expressionManager);
-      },
-    });
-  } else {
-    eng.tts?.speak(text);
-    startLip();
-  }
+function speakWithBody(eng: VrmEngine, text: string, perform?: () => void): void {
+  eng.performance?.speak(text, perform);
 }
 
 /** 说完一句话后保留表情 / 气泡的时长估算（中文约 4.5 字/秒 + 余量） */
@@ -283,7 +268,14 @@ function createVoidAgentBodyBridge(
   lipSyncRhythm?: LipSyncTextRhythmDriver,
   textVisemeExpression?: TextVisemeExpressionDriver,
 ): AgentBodyBridge {
-  return {
+  const body: AgentBodyBridge = {
+    perform(output): void {
+      setAgentSpeech(output.speech);
+      speakWithBody(eng, output.speech, () => {
+        body.setEmotion(output.emotion);
+        if (!(output.motion && body.playMotion?.(output.motion))) body.playIntent(output.intent);
+      });
+    },
     speakText(text: string): void {
       eng.busyUntil = Date.now() + estimateSpeechHoldMs(text);
       setAgentSpeech(text);
@@ -374,8 +366,13 @@ function createVoidAgentBodyBridge(
     },
 
     stop(): void {
+      eng.performance?.cancel();
       if (eng.voice) eng.voice.cancel();
       else tts?.cancel();
+      eng.walker?.interrupt();
+      eng.audioLipSync?.detach(eng.vrm.expressionManager);
+      eng.blink.reset();
+      eng.expression.reset();
       lipSyncNoop?.cancel();
       lipSyncRhythm?.cancel();
       textVisemeExpression?.cancel(eng.vrm?.expressionManager);
@@ -384,6 +381,7 @@ function createVoidAgentBodyBridge(
       setAgentSpeech("");
     },
   };
+  return body;
 }
 
 /** 疲惫 / 睡着时不走动、不做招牌动作 */
@@ -754,6 +752,32 @@ function VoidModel({
       audioLipSync.setEnabled(!!engine.lipShapeProbe?.available);
       engine.audioLipSync = audioLipSync;
 
+      const startLip = (text: string) => {
+        engine.busyUntil = Number.POSITIVE_INFINITY;
+        lipSyncNoop.notifySpeechText(text);
+        lipSyncRhythm.startText(text);
+        textVisemeExpression.startText(text);
+      };
+      engine.performance = new SpeechPerformance({
+        voice: engine.voice!,
+        onPrepare: () => {
+          engine.busyUntil = Number.POSITIVE_INFINITY;
+          engine.walker?.interrupt();
+        },
+        onStart: startLip,
+        onEnd: () => {
+          lipSyncNoop.cancel();
+          lipSyncRhythm.cancel();
+          textVisemeExpression.cancel(engine.vrm.expressionManager);
+          audioLipSync.detach(engine.vrm.expressionManager);
+          engine.expression.idle();
+          engine.animation?.play("IDLE");
+          engine.busyUntil = Date.now();
+          appliedMoodRef.current = null;
+        },
+        silentDurationMs: estimateSpeechHoldMs,
+      });
+
       const agentBody = createVoidAgentBodyBridge(
         engine,
         (text) => {
@@ -882,6 +906,8 @@ function VoidModel({
       cancelled = true;
       const eng = engineRef.current;
       if (eng) {
+        eng.agentRuntime?.interrupt();
+        eng.performance?.cancel();
         eng.unbindProactive?.();
         eng.stopIdleActivity?.();
         restoreGait(eng.gaitSaved);
@@ -1007,6 +1033,9 @@ function VoidModel({
         eng.audioLipSync?.resetAll(eng.vrm?.expressionManager ?? null);
         eng.textVisemeExpression?.update(eng.vrm?.expressionManager, delta);
       }
+
+    // Shared synthetic morphs yield to speech/blinking; native overrides remain authoritative.
+    eng.expression.coordinate();
 
     // 6. VRM 内部 Humanoid / Expression / SpringBone 最终计算
     eng.vrm.update(delta);
@@ -1154,9 +1183,19 @@ export function VoidVrmSkin({ mood }: SkinProps) {
   // 回话气泡：按文本长度自动淡出（此前会永久停留在角色身上）
   useEffect(() => {
     if (!agentSpeech) return;
-    const handle = window.setTimeout(() => setAgentSpeech(""), estimateSpeechHoldMs(agentSpeech));
-    return () => window.clearTimeout(handle);
+    const hideAfter = Date.now() + estimateSpeechHoldMs(agentSpeech);
+    const handle = window.setInterval(() => {
+      if (Date.now() >= hideAfter && !engineRef.current?.performance?.isActive()) {
+        setAgentSpeech("");
+      }
+    }, 250);
+    return () => window.clearInterval(handle);
   }, [agentSpeech]);
+
+  const interruptReply = useCallback(() => {
+    markUserActivity();
+    window.__avatarOSAgent?.interrupt();
+  }, []);
 
   // Day15A：演示模式开关（仅控制调试可见性，不碰音频/表情/嘴型算法）
   const showDebug = useAdvancedDebug();
@@ -1265,6 +1304,8 @@ export function VoidVrmSkin({ mood }: SkinProps) {
         <AgentInputOverlay
           placeholder={`和 ${displayName} 说句话`}
           onActiveChange={setInputActive}
+          onInterrupt={interruptReply}
+          busy={thinking || Boolean(agentSpeech)}
           leading={
             <button
               type="button"
@@ -1313,7 +1354,7 @@ export function VoidVrmSkin({ mood }: SkinProps) {
               return st;
             }}
           />
-          <VoiceControlOverlay tts={tts} lipProbe={lipProbe} showDebug={showDebug} />
+          <VoiceControlOverlay tts={tts} lipProbe={lipProbe} showDebug={showDebug} onStop={interruptReply} />
           <LipSyncControlOverlay
             driver={engineRef.current?.textVisemeExpression ?? null}
             getManager={() => engineRef.current?.vrm?.expressionManager ?? null}

@@ -96,7 +96,9 @@ export class JsonLlmBrain implements StatusReportingBrain {
   }
 
   async think(input: AgentBrainInput): Promise<AgentBrainOutput> {
+    input.signal?.throwIfAborted();
     const output = await this.thinkInner(input);
+    input.signal?.throwIfAborted();
     if (this.memory && input.text.trim()) {
       this.memory.append("user", input.text, input.now);
       this.memory.append("assistant", output.speech);
@@ -112,7 +114,9 @@ export class JsonLlmBrain implements StatusReportingBrain {
         systemPrompt,
         input.text,
         this.buildHistory(),
+        input.signal,
       );
+      input.signal?.throwIfAborted();
 
       // JSON 解析失败（无对象 / 语法损坏）→ 回退规则脑
       const json = extractFirstJsonObject(raw);
@@ -137,6 +141,8 @@ export class JsonLlmBrain implements StatusReportingBrain {
         speech: clampSpeech(parsed.speech, this.maxSpeechLength),
       };
     } catch (error) {
+      // A cancelled turn must not produce fallback speech or alter memory/status.
+      input.signal?.throwIfAborted();
       // LLM 不可用 / 请求抛错 → 回退规则脑
       const providerError = (this.provider as { getLastError?: () => string | null }).getLastError?.();
       this.setStatus("fallback", providerError ?? (error instanceof Error ? error.message : String(error)));
